@@ -6,3 +6,5 @@ resources:
   - service-entry.yaml
   - destination-rule.yaml
   - httproute.yaml
+  - auth-policy.yaml
+  - envoyfilter-authn-ssl.yaml

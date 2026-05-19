@@ -1,0 +1,46 @@
+# EnvoyFilter enabling TLS between the Istio gateway and Authorino's gRPC endpoint.
+# Required because Authorino serves TLS on port 50051 (via service-CA cert).
+# Without this, the ext_authz call from Envoy to Authorino fails with 500.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: ai-gateway-authn-ssl
+  namespace: ai-gateway
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  priority: -1
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: ai-inference-gateway
+  configPatches:
+  - applyTo: CLUSTER
+    match:
+      cluster:
+        service: authorino-authorino-authorization.kuadrant-system.svc.cluster.local
+    patch:
+      operation: ADD
+      value:
+        connect_timeout: 1s
+        http2_protocol_options: {}
+        lb_policy: ROUND_ROBIN
+        load_assignment:
+          cluster_name: kuadrant-auth-service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: authorino-authorino-authorization.kuadrant-system.svc.cluster.local
+                    port_value: 50051
+        name: kuadrant-auth-service
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            common_tls_context:
+              validation_context:
+                trusted_ca:
+                  filename: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+        type: STRICT_DNS

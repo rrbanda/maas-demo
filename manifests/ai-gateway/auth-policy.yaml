@@ -1,0 +1,20 @@
+# AuthPolicy enforcing OIDC/JWT authentication on the multi-cluster inference path.
+# Authorino validates tokens against the Keycloak JWKS endpoint (local to gateway cluster).
+# Replace REPLACE_WITH_KEYCLOAK_HOST with your Keycloak route hostname.
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  name: ai-gateway-oidc-auth
+  namespace: ai-gateway
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: multi-cluster-inference
+  rules:
+    authentication:
+      keycloak-jwt:
+        jwt:
+          issuerUrl: REPLACE_WITH_KEYCLOAK_ISSUER_URL

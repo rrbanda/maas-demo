@@ -63,7 +63,7 @@ flowchart TB
     ExtIdP -.->|"JWT issuer endpoint"| AuthP
 ```
 
-**Important:** The multi-cluster AI Gateway routes directly to the model's OpenShift Route on the inference cluster. It does **not** pass through the MaaS auth/rate-limiting layer. These are two independent access paths.
+**Important:** The multi-cluster AI Gateway enforces OIDC/JWT authentication via Authorino (validating tokens against the local Keycloak instance) before forwarding to the model's OpenShift Route on the inference cluster. Unauthenticated requests receive 401. The direct MaaS path uses API keys; the multi-cluster path uses OIDC tokens — both paths are auth-protected.
 
 ---
 
@@ -260,7 +260,7 @@ An inline content safety filter that inspects requests and responses for PII usi
 | Vault dev mode (in-memory) | Demo simplicity; production uses HA Vault with persistent storage |
 | Python orchestrator proxy for guardrails | Lightweight proxy demonstrates the architecture pattern without requiring full TrustyAI stack |
 | Host header rewrite in HTTPRoute | Required for Istio TLS origination to match remote route hostname |
-| Multi-cluster routes directly to model | Simplifies demo; production would route through MaaS for auth on both paths |
+| Multi-cluster uses OIDC (not API keys) | Gateway cluster validates JWTs locally via Keycloak; production may unify to single auth mechanism |
 | ESO secrets not consumed by MaaS | Demonstrates rotation infrastructure; wiring to workloads is environment-specific |
 | Scripts use imperative `oc apply` ordering | Ensures correct deployment sequence; Kustomize profiles available for declarative use |
 
@@ -271,7 +271,7 @@ An inline content safety filter that inspects requests and responses for PII usi
 | Endpoint | URL Pattern | Auth | Notes |
 |----------|-------------|------|-------|
 | MaaS Gateway (inference) | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC token | Created by RHOAI operator |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None | Direct to model, bypasses MaaS |
+| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | OIDC JWT | Keycloak token required; Authorino validates locally |
 | Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No filtering |
 | Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 | OIDC Provider | `https://<KEYCLOAK_HOST>/realms/<realm>` | admin creds | External — not deployed here |

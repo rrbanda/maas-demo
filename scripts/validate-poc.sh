@@ -320,20 +320,44 @@ if [ -n "${CTX_GATEWAY:-}" ]; then
   SE=$(oc get serviceentry -n ai-gateway --no-headers 2>/dev/null | wc -l | tr -d ' ')
   DR=$(oc get destinationrule -n ai-gateway --no-headers 2>/dev/null | wc -l | tr -d ' ')
   HR=$(oc get httproute -n ai-gateway --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$SE" -ge 1 ] && [ "$DR" -ge 1 ] && [ "$HR" -ge 1 ]; then
-    record "BONUS" "Multi-cluster resources" "PASS" "SE(${SE}) DR(${DR}) HR(${HR})"
+  AP=$(oc get authpolicy -n ai-gateway --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$SE" -ge 1 ] && [ "$DR" -ge 1 ] && [ "$HR" -ge 1 ] && [ "$AP" -ge 1 ]; then
+    record "BONUS" "Multi-cluster resources" "PASS" "SE(${SE}) DR(${DR}) HR(${HR}) AuthPolicy(${AP})"
   else
-    record "BONUS" "Multi-cluster resources" "FAIL" "Missing: SE=${SE} DR=${DR} HR=${HR}"
+    record "BONUS" "Multi-cluster resources" "FAIL" "Missing: SE=${SE} DR=${DR} HR=${HR} AP=${AP}"
   fi
 
-  MC_CHAT=$(oc run val-mc --rm -i --restart=Never --image=registry.access.redhat.com/ubi9/ubi-minimal -n default --command -- \
-    curl -s --max-time 15 "http://ai-inference-gateway-istio.ai-gateway.svc:80/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is AI?\"}],\"max_tokens\":20}" 2>/dev/null)
-  if echo "$MC_CHAT" | grep -q '"choices"'; then
-    record "BONUS" "Cross-cluster inference" "PASS" "Request routed cross-cluster"
+  # Test auth enforcement: unauthenticated should get 401
+  MC_NOAUTH=$(oc run val-mc-noauth --rm -i --restart=Never --image=curlimages/curl -n default --command -- \
+    curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
+    "http://ai-inference-gateway-istio.ai-gateway.svc:80/v1/models" 2>/dev/null)
+  if [ "$MC_NOAUTH" = "401" ]; then
+    record "BONUS" "Multi-cluster auth enforced" "PASS" "Unauthenticated request returns 401"
   else
-    record "BONUS" "Cross-cluster inference" "FAIL" "Response: ${MC_CHAT:0:100}"
+    record "BONUS" "Multi-cluster auth enforced" "FAIL" "Expected 401, got ${MC_NOAUTH}"
+  fi
+
+  # Test with OIDC token (requires Keycloak on gateway cluster)
+  if [ -n "${KEYCLOAK_HOST:-}" ]; then
+    TOKEN=$(curl -sk --max-time 10 "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+      -d "grant_type=client_credentials&client_id=${OIDC_CLIENT_ID}&client_secret=${OIDC_CLIENT_SECRET}" 2>/dev/null \
+      | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)
+    if [ -n "$TOKEN" ]; then
+      MC_CHAT=$(oc run val-mc --rm -i --restart=Never --image=curlimages/curl -n default --command -- \
+        curl -s --max-time 15 "http://ai-inference-gateway-istio.ai-gateway.svc:80/v1/chat/completions" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is AI?\"}],\"max_tokens\":20}" 2>/dev/null)
+      if echo "$MC_CHAT" | grep -q '"choices"'; then
+        record "BONUS" "Cross-cluster inference (OIDC)" "PASS" "JWT auth + cross-cluster inference"
+      else
+        record "BONUS" "Cross-cluster inference (OIDC)" "FAIL" "Response: ${MC_CHAT:0:100}"
+      fi
+    else
+      record "BONUS" "Cross-cluster inference (OIDC)" "SKIP" "Could not obtain Keycloak token"
+    fi
+  else
+    record "BONUS" "Cross-cluster inference (OIDC)" "SKIP" "KEYCLOAK_HOST not configured"
   fi
 
   oc config use-context "$CTX_INFERENCE" &>/dev/null 2>&1 || true

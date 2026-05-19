@@ -16,7 +16,7 @@ This document outlines the differences between this demo environment and a produ
 | Vault secrets | ESO syncs to K8s Secrets (not consumed by MaaS) | Secrets mounted into relevant workloads | Demonstrates rotation pattern; wiring is environment-specific |
 | Vault mode | Dev mode (in-memory, ephemeral) | Production HA Vault with persistent storage | Architecture identical; only deployment mode differs |
 | Rate limiting | Configured in manifests (tokens/hour) | Enforced with real traffic patterns | Limitador counters active; production tuning needed for actual values |
-| Multi-cluster | AI Gateway on gateway cluster routes to model on inference cluster (bypasses MaaS auth) | Route through MaaS for unified auth on all paths | Demo proves connectivity; production adds auth on multi-cluster path |
+| Multi-cluster | AI Gateway with OIDC auth (Authorino + Keycloak) routes to model on inference cluster | Route through MaaS for unified auth on all paths | Auth enforced via JWT on gateway cluster; production may unify to single auth mechanism |
 | Observability | Prometheus + ServiceMonitors + Dashboard ConfigMap | Grafana/Perses dashboards + alerting + federation | Dashboard JSON ready; needs Grafana instance and alert rules |
 | Guardrails | Regex-based PII detection only | LLM-powered content analysis + TrustyAI | Demo proves architecture pattern; production adds ML-based detectors |
 | API management | Direct access to AI Bridge | End users → API Gateway (e.g., Apigee) → AI Bridge → Model | Architecture validated; API gateway just points to AI Bridge URL |
@@ -73,7 +73,7 @@ flowchart LR
 
 6. **Content safety can be layered inline** — guardrails gateway inspects traffic without changing the model; current regex-based detection extensible to LLM-based analysis
 
-7. **Multi-cluster routing proves connectivity** — Istio gateway with TLS origination routes to remote model; production should add MaaS auth on this path too
+7. **Multi-cluster routing with auth enforcement** — Istio gateway validates OIDC JWTs via Authorino (local Keycloak) before forwarding to remote model; both access paths are now auth-protected
 
 8. **Deployment is scripted and repeatable** — `deploy-all.sh` deploys the full stack in correct order; Kustomize profiles available for ArgoCD adoption
 
@@ -87,7 +87,7 @@ flowchart LR
 | 2 | Configure cert-manager for TLS certificates | Low |
 | 3 | Point OIDC AuthConfig to enterprise IdP | Low (config change) |
 | 4 | Mount ESO-synced secrets into MaaS/PG workloads | Low-Medium |
-| 5 | Route multi-cluster traffic through MaaS auth | Medium |
+| 5 | ~~Route multi-cluster traffic through MaaS auth~~ | ~~Done~~ (OIDC enforced) |
 | 6 | Deploy production Vault (HA mode) | Medium |
 | 7 | Tune rate limits for actual traffic patterns | Medium |
 | 8 | Set up Grafana with alert rules | Medium |

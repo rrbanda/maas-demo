@@ -13,7 +13,7 @@ Demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red H
 | OIDC/SSO federation | Any OIDC IdP JWT validation alongside API keys (BYO Keycloak/Okta/Azure AD) |
 | Secret rotation pattern | Vault + External Secrets Operator demonstrating zero-downtime K8s Secret sync |
 | Content safety guardrails | PII detection (email, SSN, credit card regex) before model access |
-| Multi-cluster routing | Istio gateway on CPU cluster → model route on remote GPU cluster |
+| Multi-cluster routing | Istio gateway with OIDC auth → TLS to model on remote GPU cluster |
 
 ---
 
@@ -40,6 +40,7 @@ flowchart TB
 
     Client(["API Consumer"]) --> MaaS
     Client -->|"multi-cluster path"| AIGw
+    AIGw -->|"OIDC auth (Authorino)"| AIGw
     AIGw -->|"TLS origination<br/>to model route"| vLLM
     MaaS -->|"auth + rate limit"| vLLM
     Guard -->|"PII filter proxy"| vLLM
@@ -51,16 +52,22 @@ flowchart TB
 
 ### Multi-Cluster Traffic Flow
 
-The AI Gateway routes directly to the model's OpenShift Route on the inference cluster. This provides a single entry point on the gateway cluster but does **not** pass through MaaS auth (that is a separate direct-access path).
+The AI Gateway enforces OIDC/JWT authentication (via Authorino + Keycloak on the gateway cluster) before forwarding requests to the model on the inference cluster. Unauthenticated requests receive 401.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant GW as AI Gateway<br/>(Gateway Cluster)
+    participant Auth as Authorino<br/>(JWT validation)
+    participant KC as Keycloak<br/>(JWKS)
     participant RT as OpenShift Route<br/>(Inference Cluster)
     participant V as vLLM
 
-    C->>GW: POST /v1/chat/completions
+    C->>GW: POST /v1/chat/completions<br/>+ Authorization: Bearer <JWT>
+    GW->>Auth: ext_authz (gRPC/TLS)
+    Auth->>KC: Validate JWT signature (JWKS)
+    KC-->>Auth: Valid
+    Auth-->>GW: Allow
     GW->>GW: Host header rewrite
     GW->>RT: TLS origination (port 443)
     RT->>V: Route to vLLM pod
@@ -173,7 +180,7 @@ maas-demo/
 │   │   └── observability/                # ServiceMonitors + Dashboard
 │   ├── model/                            # Model deployment + subscriptions
 │   ├── llm-d/                            # Endpoint Picker Pod (intelligent routing)
-│   ├── ai-gateway/                       # Multi-cluster Istio routing
+│   ├── ai-gateway/                       # Multi-cluster Istio routing + OIDC auth
 │   ├── guardrails/                       # Content safety gateway (PII regex)
 │   ├── oidc/                             # OIDC AuthConfig (BYO IdP)
 │   └── vault-eso/                        # Vault + External Secrets (pattern demo)
@@ -218,7 +225,7 @@ Deploys the gateway components on one cluster and inference on another.
 | Endpoint | URL Pattern | Auth | Notes |
 |----------|-------------|------|-------|
 | MaaS Gateway | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC | Created by RHOAI operator |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None | Routes directly to model (bypasses MaaS auth) |
+| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | OIDC JWT | Keycloak token required; Authorino validates locally |
 | Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No PII filtering |
 | Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 
