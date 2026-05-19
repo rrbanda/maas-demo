@@ -2,12 +2,22 @@
 # AI Bridge (MaaS) Demo — Teardown Script
 # Removes all demo components in reverse order.
 #
-# Usage: ./scripts/teardown.sh [--profile single-cluster|multi-cluster]
+# Usage: ./scripts/teardown.sh [single-cluster|multi-cluster]
+#        ./scripts/teardown.sh --profile multi-cluster
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROFILE="${1:-single-cluster}"
+
+# Parse profile argument
+PROFILE="single-cluster"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile) PROFILE="$2"; shift 2 ;;
+    single-cluster|multi-cluster) PROFILE="$1"; shift ;;
+    *) echo "Unknown argument: $1"; exit 1 ;;
+  esac
+done
 
 if [ -f "$SCRIPT_DIR/config.env" ]; then
   source "$SCRIPT_DIR/config.env"

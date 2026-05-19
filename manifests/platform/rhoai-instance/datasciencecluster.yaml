@@ -5,6 +5,8 @@ metadata:
 spec:
   components:
     aipipelines:
+      argoWorkflowsControllers:
+        managementState: Removed
       managementState: Removed
     dashboard:
       managementState: Managed
@@ -19,12 +21,21 @@ spec:
         managementState: Managed
       rawDeploymentServiceConfig: Headless
     kueue:
+      defaultClusterQueueName: default
+      defaultLocalQueueName: default
       managementState: Unmanaged
+    llamastackoperator:
+      managementState: Removed
+    mlflowoperator:
+      managementState: Removed
     modelregistry:
       managementState: Removed
+      registriesNamespace: rhoai-model-registries
     ray:
       managementState: Removed
     trainer:
+      managementState: Removed
+    trainingoperator:
       managementState: Removed
     trustyai:
       eval:
@@ -35,3 +46,4 @@ spec:
       mcpGuardrailsMode: true
     workbenches:
       managementState: Removed
+      workbenchNamespace: rhods-notebooks

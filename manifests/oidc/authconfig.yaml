@@ -1,4 +1,8 @@
 # AuthConfig for OIDC/SSO validation on the MaaS gateway.
+#
+# PREREQUISITE: You must have an OIDC provider (Keycloak, Okta, Azure AD, etc.) deployed
+# separately. This manifest only configures Authorino to validate JWT tokens from your IdP.
+#
 # Replace placeholders with your environment values:
 #   REPLACE_WITH_MAAS_GATEWAY_HOST — the MaaS gateway external hostname (ELB or route)
 #   REPLACE_WITH_KEYCLOAK_ISSUER_URL — e.g., https://keycloak.apps.<domain>/realms/ai-bridge

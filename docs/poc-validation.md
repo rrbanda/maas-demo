@@ -27,10 +27,10 @@ This document maps each PoC success criterion to validated evidence from the dem
 
 ```bash
 $ oc get maassubscription -n llm-inference
-NAME                   TIER       PRIORITY   TOKEN_LIMIT
-premium-analytics      premium    1          500000
-standard-engineering   standard   5          100000
-basic-developers       basic      10         50000
+NAME                      TIER       PRIORITY   TOKEN_LIMIT
+team-a-ml-engineering     premium    1          500000
+team-b-data-science       standard   5          100000
+team-c-app-developers     basic      10         50000
 ```
 
 - API keys stored in PostgreSQL, validated per-request by Authorino
@@ -53,7 +53,7 @@ basic-developers       basic      10         50000
 
 ### SC #4 — Tiered Access
 
-- Three distinct tiers defined in `team-subscriptions.yaml`
+- Three distinct tiers defined in `manifests/model/subscriptions.yaml`
 - Each tier has independent rate limits and priority scheduling
 
 ### SC #5 — OIDC/SSO

@@ -176,15 +176,21 @@ maas-demo/
 Deploys the full stack on one OpenShift cluster. Multi-cluster routing resources are skipped.
 
 ```bash
-./scripts/deploy-all.sh --profile single-cluster
+./scripts/deploy-all.sh single-cluster
+# or: ./scripts/deploy-all.sh --profile single-cluster
 ```
 
 ### Multi-Cluster
 Deploys the gateway components on one cluster and inference on another.
 
 ```bash
-./scripts/deploy-all.sh --profile multi-cluster
+./scripts/deploy-all.sh multi-cluster
+# or: ./scripts/deploy-all.sh --profile multi-cluster
 ```
+
+> **Note:** The `profiles/` directory provides Kustomize overlays for ArgoCD/GitOps users
+> who prefer declarative deployment. The scripts handle ordering imperatively and are
+> recommended for initial setup and validation.
 
 ---
 

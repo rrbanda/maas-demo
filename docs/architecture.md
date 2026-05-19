@@ -193,14 +193,19 @@ Per-subscription request count and token usage visible via Prometheus metrics.
 
 #### C1. OIDC / SSO Integration
 
-The AI Bridge federates with an enterprise identity provider (Keycloak) to support token-based authentication alongside API keys.
+The AI Bridge federates with an enterprise identity provider (Keycloak or any OIDC-compliant IdP) to support token-based authentication alongside API keys.
 
-**What's deployed:**
-- Keycloak `ai-bridge` realm
-- OIDC client: `ai-bridge-gateway` (client_credentials + password grants)
-- Test users: `ai-admin` (admin role), `ai-engineer` (engineer role)
-- Authorino `AuthConfig` validating JWTs from the Keycloak issuer
+**What's deployed (in this repo):**
+- Authorino `AuthConfig` validating JWTs from the configured OIDC issuer (`manifests/oidc/authconfig.yaml`)
 - Dual authentication: both API keys and OIDC Bearer tokens accepted
+
+**External prerequisite (bring your own):**
+- Keycloak (or any OIDC provider) with:
+  - A realm (e.g., `ai-bridge`)
+  - An OIDC client (`ai-bridge-gateway`) with `client_credentials` grant enabled
+  - Roles: `ai-admin`, `ai-engineer` assigned to users
+- Set `KEYCLOAK_HOST` in `scripts/config.env` to your IdP's hostname
+- For Keycloak on OpenShift, install the RHBK operator and create a `Keycloak` CR + `KeycloakRealmImport`
 
 #### C2. Secret Management (External Secrets Operator + Vault)
 

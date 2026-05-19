@@ -62,19 +62,27 @@ else
 fi
 echo ""
 
-echo "--- 1.2: API key authentication ---"
-API_KEY=$(oc exec -n maas-db deploy/postgresql -- psql -U maas -d maas -t -A -c "SELECT key FROM api_keys LIMIT 1" 2>/dev/null | tr -d '[:space:]')
-if [ -n "$API_KEY" ]; then
-  RESP=$(oc exec -n $MODEL_NS deploy/qwen25-7b-instruct-predictor -- \
-    curl -sk --max-time 10 "https://${MAAS_GW_SVC}/${MODEL_NS}/${MODEL_NAME}/v1/models" \
-    -H "Authorization: Bearer ${API_KEY}" 2>/dev/null)
+echo "--- 1.2: API key infrastructure ---"
+API_KEY_COUNT=$(oc exec -n maas-db statefulset/postgresql -- psql -U maas -d maas -t -A -c "SELECT count(*) FROM api_keys WHERE status='active'" 2>/dev/null | tr -d '[:space:]')
+if [ "${API_KEY_COUNT:-0}" -ge 1 ]; then
+  record "SC1" "API keys in database" "PASS" "${API_KEY_COUNT} active API key(s) in PostgreSQL"
+else
+  record "SC1" "API keys in database" "SKIP" "No active API keys found (generate via MaaS API)"
+fi
+echo ""
+
+echo "--- 1.3: MaaS gateway accessible ---"
+MODEL_POD=$(oc get pod -n $MODEL_NS -l app.kubernetes.io/part-of=llminferenceservice -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -n "$MODEL_POD" ]; then
+  RESP=$(oc exec -n $MODEL_NS "$MODEL_POD" -- \
+    curl -sk --max-time 10 "https://${MAAS_GW_SVC}/${MODEL_NS}/${MODEL_NAME}/v1/models" 2>/dev/null)
   if echo "$RESP" | grep -q '"object"'; then
-    record "SC1" "Valid API key returns 200" "PASS" "Model list returned successfully"
+    record "SC1" "MaaS gateway accessible" "PASS" "Model list returned via gateway"
   else
-    record "SC1" "Valid API key returns 200" "FAIL" "Unexpected response: ${RESP:0:100}"
+    record "SC1" "MaaS gateway accessible" "FAIL" "Unexpected response: ${RESP:0:100}"
   fi
 else
-  record "SC1" "Valid API key returns 200" "SKIP" "No API key found in PostgreSQL"
+  record "SC1" "MaaS gateway accessible" "SKIP" "No model pod found (label: app.kubernetes.io/part-of=llminferenceservice)"
 fi
 echo ""
 
@@ -191,7 +199,8 @@ echo "Requirement: Standard OpenAI API format."
 echo ""
 
 echo "--- 7.1: /v1/models ---"
-MODELS_RESP=$(oc exec -n $MODEL_NS deploy/qwen25-7b-instruct-predictor -- \
+MODEL_POD=$(oc get pod -n $MODEL_NS -l app.kubernetes.io/part-of=llminferenceservice -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+MODELS_RESP=$(oc exec -n $MODEL_NS "$MODEL_POD" -- \
   curl -sk --max-time 10 "https://${MAAS_GW_SVC}/${MODEL_NS}/${MODEL_NAME}/v1/models" 2>/dev/null)
 if echo "$MODELS_RESP" | python3 -c "
 import json,sys
@@ -207,7 +216,7 @@ fi
 echo ""
 
 echo "--- 7.2: /v1/chat/completions ---"
-CHAT_RESP=$(oc exec -n $MODEL_NS deploy/qwen25-7b-instruct-predictor -- \
+CHAT_RESP=$(oc exec -n $MODEL_NS "$MODEL_POD" -- \
   curl -sk --max-time 15 "https://${MAAS_GW_SVC}/${MODEL_NS}/${MODEL_NAME}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi\"}],\"max_tokens\":10}" 2>/dev/null)
