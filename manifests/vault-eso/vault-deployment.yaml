@@ -38,8 +38,12 @@ spec:
             - name: HOME
               value: "/tmp"
           securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
-              add: ["IPC_LOCK"]
+              drop: ["ALL"]
           readinessProbe:
             httpGet:
               path: /v1/sys/health
