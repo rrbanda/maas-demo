@@ -1,0 +1,23 @@
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit actual secrets)
+scripts/config.env
+*.pem
+*.key
+
+# Cursor/Tessl
+.cursor/
+.tessl/
+
+# Temporary
+tmp/
+*.tmp

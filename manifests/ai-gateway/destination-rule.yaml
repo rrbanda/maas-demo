@@ -1,0 +1,15 @@
+# DestinationRule configures TLS origination for the remote inference cluster.
+# Replace REPLACE_WITH_REMOTE_MODEL_HOSTNAME with the same hostname used in service-entry.yaml.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: remote-inference-tls
+  namespace: ai-gateway
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  host: REPLACE_WITH_REMOTE_MODEL_HOSTNAME
+  trafficPolicy:
+    tls:
+      mode: SIMPLE
+      insecureSkipVerify: true

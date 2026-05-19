@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-d-epp
+  namespace: llm-inference
+  labels:
+    app: llm-d-epp
+    app.kubernetes.io/part-of: llm-d-epp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: registry.redhat.io/rhoai/odh-llm-d-inference-scheduler-rhel9@sha256:bddf686d6eaf1a607e1c697f58165d685944607cb4629648f27e56b2884e3de0
+          args:
+            - --pool-name=qwen25-7b-pool
+            - --pool-namespace=llm-inference
+            - --secure-serving=false
+            - --metrics-endpoint-auth=false
+          ports:
+            - containerPort: 9002
+              name: grpc
+            - containerPort: 9003
+              name: health
+            - containerPort: 9090
+              name: metrics
+          livenessProbe:
+            grpc:
+              port: 9003
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 9003
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

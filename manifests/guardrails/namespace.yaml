@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-guardrails
+  labels:
+    opendatahub.io/dashboard: "true"
+    app.kubernetes.io/part-of: guardrails-gateway

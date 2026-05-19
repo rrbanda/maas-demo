@@ -1,0 +1,83 @@
+# Guardrails gateway with orchestrator proxy sidecar.
+# The VLLM_URL should point to the KServe workload service for your model.
+# Example: https://qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardrails-gateway
+  namespace: ai-guardrails
+  labels:
+    app: guardrails-gateway
+    app.kubernetes.io/part-of: guardrails-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guardrails-gateway
+  template:
+    metadata:
+      labels:
+        app: guardrails-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: registry.redhat.io/rhoai/odh-trustyai-vllm-orchestrator-gateway-rhel9@sha256:0b99cdc8e4ee57751cbe2298cd13853fbf79b882353057542250ee29d451f78b
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: LISTEN_PORT
+              value: "8090"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        - name: orchestrator-proxy
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command: ["python3", "/config/orchestrator.py"]
+          ports:
+            - containerPort: 8085
+              name: orchestrator
+          env:
+            - name: VLLM_URL
+              value: "https://REPLACE_WITH_VLLM_SERVICE:8000"
+          volumeMounts:
+            - name: orchestrator-script
+              mountPath: /config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8085
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: guardrails-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: orchestrator-script
+          configMap:
+            name: guardrails-config
+            items:
+              - key: orchestrator.py
+                path: orchestrator.py

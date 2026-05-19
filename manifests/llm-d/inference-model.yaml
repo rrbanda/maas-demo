@@ -1,0 +1,12 @@
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: qwen25-7b-instruct
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: llm-d-epp
+spec:
+  modelName: qwen25-7b-instruct
+  poolRef:
+    name: qwen25-7b-pool
+  criticality: Critical

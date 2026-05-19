@@ -1,0 +1,69 @@
+# Three-tier subscription model demonstrating per-team governance
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-a-ml-engineering
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/component: governance
+    tier: premium
+spec:
+  owner:
+    users:
+      - team-a-lead
+    groups:
+      - name: "team-a"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: llm-inference
+      tokenRateLimits:
+        - limit: 500000
+          window: "1h"
+  priority: 1
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-b-data-science
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/component: governance
+    tier: standard
+spec:
+  owner:
+    users:
+      - team-b-lead
+    groups:
+      - name: "team-b"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: llm-inference
+      tokenRateLimits:
+        - limit: 100000
+          window: "1h"
+  priority: 5
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-c-app-developers
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/component: governance
+    tier: basic
+spec:
+  owner:
+    users:
+      - team-c-lead
+    groups:
+      - name: "team-c"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: llm-inference
+      tokenRateLimits:
+        - limit: 50000
+          window: "1h"
+  priority: 10

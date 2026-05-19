@@ -1,0 +1,18 @@
+# Multi-cluster profile: inference cluster (GPU).
+# Deploys the model, llm-d, guardrails, and MaaS platform components.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Platform
+  - ../../../manifests/platform/monitoring-config
+  - ../../../manifests/platform/rhoai-instance
+  - ../../../manifests/platform/maas-postgres
+  - ../../../manifests/platform/observability
+  # Model
+  - ../../../manifests/model
+  # llm-d
+  - ../../../manifests/llm-d
+  # Guardrails
+  - ../../../manifests/guardrails
+  # OIDC
+  - ../../../manifests/oidc

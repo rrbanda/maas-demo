@@ -1,0 +1,11 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSModelRef
+metadata:
+  name: qwen25-7b-instruct
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+spec:
+  modelRef:
+    kind: LLMInferenceService
+    name: qwen25-7b-instruct

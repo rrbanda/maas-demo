@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: authorino-metrics
+  namespace: kuadrant-system
+  labels:
+    app: authorino
+    app.kubernetes.io/part-of: ai-bridge-observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authorino
+  endpoints:
+    - port: metrics
+      interval: 15s

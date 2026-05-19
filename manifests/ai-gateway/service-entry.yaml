@@ -1,0 +1,36 @@
+# ServiceEntry declares the remote inference cluster model endpoint as an external mesh service.
+# Replace REPLACE_WITH_REMOTE_MODEL_HOSTNAME with your inference cluster's model route hostname.
+# Example: qwen25-7b-inference-llm-inference.apps.<inference-cluster-domain>
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: remote-inference-cluster
+  namespace: ai-gateway
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  hosts:
+    - REPLACE_WITH_REMOTE_MODEL_HOSTNAME
+  location: MESH_EXTERNAL
+  ports:
+    - number: 443
+      name: https
+      protocol: HTTPS
+  resolution: DNS
+---
+# ExternalName service for the HTTPRoute backendRef
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-backend
+  namespace: ai-gateway
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  type: ExternalName
+  externalName: REPLACE_WITH_REMOTE_MODEL_HOSTNAME
+  ports:
+    - port: 443
+      targetPort: 443
+      protocol: TCP
+      name: https

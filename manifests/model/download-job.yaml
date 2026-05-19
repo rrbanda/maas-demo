@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-qwen25-7b
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/component: model-download
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: qwen25-7b-instruct
+        app.kubernetes.io/component: model-download
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: download
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - bash
+            - -ec
+            - |
+              echo "=== Downloading Qwen2.5-7B-Instruct ==="
+              df -h /models
+              pip install -q huggingface_hub
+              python3 << 'PYEOF'
+              from huggingface_hub import snapshot_download
+              import os
+              target = '/models/Qwen2.5-7B-Instruct'
+              marker = os.path.join(target, '.download_complete')
+              if os.path.exists(marker):
+                  print('Model already downloaded (marker found). Skipping.')
+                  exit(0)
+              snapshot_download(
+                  repo_id='Qwen/Qwen2.5-7B-Instruct',
+                  local_dir=target,
+                  ignore_patterns=['*.gguf', '*.bin', 'original/*', 'consolidated*'],
+              )
+              open(marker, 'w').write('ok')
+              print('Download complete.')
+              PYEOF
+              echo ""
+              ls -lh /models/Qwen2.5-7B-Instruct/
+              df -h /models
+              echo "DONE"
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "8Gi"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: qwen25-model-weights

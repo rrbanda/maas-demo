@@ -1,0 +1,27 @@
+# AuthConfig for OIDC/SSO validation on the MaaS gateway.
+# Replace placeholders with your environment values:
+#   REPLACE_WITH_MAAS_GATEWAY_HOST — the MaaS gateway external hostname (ELB or route)
+#   REPLACE_WITH_KEYCLOAK_ISSUER_URL — e.g., https://keycloak.apps.<domain>/realms/ai-bridge
+apiVersion: authorino.kuadrant.io/v1beta3
+kind: AuthConfig
+metadata:
+  name: maas-gateway-oidc
+  namespace: openshift-ingress
+  labels:
+    security.opendatahub.io/authorization-group: default
+    app.kubernetes.io/part-of: ai-bridge-oidc
+spec:
+  hosts:
+    - REPLACE_WITH_MAAS_GATEWAY_HOST
+  authentication:
+    oidc-jwt:
+      jwt:
+        issuerUrl: REPLACE_WITH_KEYCLOAK_ISSUER_URL
+      credentials:
+        authorizationHeader:
+          prefix: "Bearer"
+  authorization:
+    role-check:
+      patternMatching:
+        patterns:
+          - predicate: 'auth.identity.realm_access.roles.exists(r, r == "ai-admin" || r == "ai-engineer")'

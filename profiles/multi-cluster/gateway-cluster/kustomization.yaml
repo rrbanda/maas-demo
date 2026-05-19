@@ -1,0 +1,9 @@
+# Multi-cluster profile: gateway cluster (CPU).
+# Deploys the AI Gateway, Vault, and ESO components.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # AI Gateway (multi-cluster routing)
+  - ../../../manifests/ai-gateway
+  # Vault + ESO
+  - ../../../manifests/vault-eso

@@ -1,0 +1,17 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSAuthPolicy
+metadata:
+  name: qwen25-7b-instruct-auth
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+spec:
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: llm-inference
+  subjects:
+    groups:
+      - name: "system:authenticated"
+      - name: "system:authenticated:oauth"
+    users:
+      - "admin"

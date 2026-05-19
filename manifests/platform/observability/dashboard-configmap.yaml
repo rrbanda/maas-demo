@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-gateway-dashboard
+  namespace: openshift-config-managed
+  labels:
+    console.openshift.io/dashboard: "true"
+    app.kubernetes.io/part-of: ai-bridge-observability
+data:
+  ai-gateway-inference.json: |
+    {
+      "title": "AI Gateway - Multi-Tenant Inference",
+      "description": "Observability dashboard for AI Bridge with per-subscription token usage, latency, and throughput",
+      "panels": [
+        {
+          "title": "Authorized Calls by Route",
+          "type": "graph",
+          "targets": [
+            {"expr": "authorized_calls", "legendFormat": "{{limitador_namespace}}"}
+          ]
+        },
+        {
+          "title": "Token Rate Limit Hits (per subscription)",
+          "type": "graph",
+          "targets": [
+            {"expr": "rate(authorized_hits[5m])", "legendFormat": "{{limitador_namespace}}"}
+          ]
+        },
+        {
+          "title": "vLLM Time to First Token (TTFT)",
+          "type": "graph",
+          "targets": [
+            {"expr": "histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))", "legendFormat": "p95 TTFT"},
+            {"expr": "histogram_quantile(0.50, rate(vllm:time_to_first_token_seconds_bucket[5m]))", "legendFormat": "p50 TTFT"}
+          ]
+        },
+        {
+          "title": "vLLM Throughput (tokens/sec)",
+          "type": "graph",
+          "targets": [
+            {"expr": "rate(vllm:prompt_tokens_total[5m])", "legendFormat": "Prompt tokens/s"},
+            {"expr": "rate(vllm:generation_tokens_total[5m])", "legendFormat": "Generation tokens/s"}
+          ]
+        },
+        {
+          "title": "GPU KV Cache Utilization",
+          "type": "gauge",
+          "targets": [
+            {"expr": "vllm:gpu_cache_usage_perc", "legendFormat": "KV Cache %"}
+          ]
+        },
+        {
+          "title": "Request Queue Depth",
+          "type": "graph",
+          "targets": [
+            {"expr": "vllm:num_requests_waiting", "legendFormat": "Waiting"},
+            {"expr": "vllm:num_requests_running", "legendFormat": "Running"}
+          ]
+        },
+        {
+          "title": "Error Rate (4xx/5xx)",
+          "type": "graph",
+          "targets": [
+            {"expr": "rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class=~\"4|5\"}[5m])", "legendFormat": "{{envoy_response_code_class}}xx"}
+          ]
+        },
+        {
+          "title": "Authorino Auth Decisions",
+          "type": "graph",
+          "targets": [
+            {"expr": "rate(auth_server_authconfig_total{authconfig_result=\"OK\"}[5m])", "legendFormat": "Allowed"},
+            {"expr": "rate(auth_server_authconfig_total{authconfig_result!=\"OK\"}[5m])", "legendFormat": "Denied"}
+          ]
+        }
+      ]
+    }

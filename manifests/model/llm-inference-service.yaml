@@ -1,0 +1,42 @@
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: qwen25-7b-instruct
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/name: qwen25-7b-instruct
+  annotations:
+    opendatahub.io/model-type: generative
+    openshift.io/display-name: "Qwen 2.5 7B Instruct"
+    openshift.io/description: "Qwen 2.5 7B instruction-tuned model for multi-cluster inference demo"
+spec:
+  model:
+    name: qwen25-7b-instruct
+    uri: pvc://qwen25-model-weights/Qwen2.5-7B-Instruct
+  replicas: 1
+  router:
+    route: {}
+    gateway:
+      refs:
+        - name: maas-default-gateway
+          namespace: openshift-ingress
+  template:
+    containers:
+      - name: main
+        args:
+          - --dtype=auto
+          - --max-model-len=4096
+          - --gpu-memory-utilization=0.90
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "24Gi"
+            nvidia.com/gpu: "1"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
