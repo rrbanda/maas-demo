@@ -1,20 +1,19 @@
 # AI Bridge (MaaS) Demo — Red Hat OpenShift AI 3.4
 
-Complete demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red Hat OpenShift AI (RHOAI) 3.4. This repository provides a fully GitOps-managed reference implementation that validates centralized model governance, multi-cluster routing, enterprise identity federation, content safety guardrails, and observability.
+Demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red Hat OpenShift AI (RHOAI) 3.4. This repository provides manifests, scripts, and documentation to deploy and validate centralized model governance, multi-cluster routing, enterprise identity federation, content safety guardrails, and observability.
 
 ## What This Demonstrates
 
 | Capability | Description |
 |-----------|-------------|
-| Per-use-case authentication | API keys scoped to teams/models with instant revocation |
-| Token-based rate limiting | TPM/RPM limits per subscription via Limitador |
+| Per-use-case authentication | API keys scoped to teams/models via MaaSSubscription |
+| Token-based rate limiting | Per-subscription token limits (tokens/hour) via Limitador |
 | Tiered access | Premium / Standard / Basic tiers with independent policies |
 | Usage tracking | Per-subscription metrics via Prometheus + ServiceMonitors |
-| OIDC/SSO federation | Keycloak (or any IdP) JWT validation alongside API keys |
-| Secret rotation | Vault + External Secrets Operator with zero-downtime sync |
-| Content safety guardrails | PII detection (email, SSN, credit card) before model access |
-| Multi-cluster routing | Istio gateway on CPU cluster → model on remote GPU cluster |
-| Full GitOps lifecycle | Entire stack deployable declaratively from Git |
+| OIDC/SSO federation | Any OIDC IdP JWT validation alongside API keys (BYO Keycloak/Okta/Azure AD) |
+| Secret rotation pattern | Vault + External Secrets Operator demonstrating zero-downtime K8s Secret sync |
+| Content safety guardrails | PII detection (email, SSN, credit card regex) before model access |
+| Multi-cluster routing | Istio gateway on CPU cluster → model route on remote GPU cluster |
 
 ---
 
@@ -22,78 +21,78 @@ Complete demonstration of **Models-as-a-Service** (MaaS) governance capabilities
 
 ```mermaid
 flowchart TB
-    subgraph GW["Gateway Cluster (CPU)"]
+    subgraph GW["Gateway Cluster (CPU) — optional"]
         direction TB
-        AIGw["AI Gateway<br/>(Istio/Envoy)"]
-        KC["Keycloak<br/>OIDC/SSO"]
+        AIGw["AI Gateway<br/>(Istio + Gateway API)"]
         Vault["HashiCorp Vault<br/>+ ESO"]
     end
 
     subgraph INF["Inference Cluster (GPU)"]
         direction TB
-        MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)"]
+        MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)<br/>created by RHOAI operator"]
         Guard["Guardrails Gateway<br/>(PII Detection)"]
         EPP["llm-d EPP<br/>(Endpoint Picker)"]
         vLLM["vLLM<br/>(Qwen2.5-7B-Instruct)"]
-        PG["PostgreSQL<br/>(Subscriptions/Keys)"]
+        PG["PostgreSQL<br/>(MaaS state)"]
         Prom["Prometheus<br/>(User Workload Monitoring)"]
+        OIDC["OIDC AuthConfig<br/>(validates JWT from external IdP)"]
     end
 
-    Client(["API Consumer"]) --> AIGw
-    Client --> MaaS
-    AIGw -->|"TLS origination<br/>cross-cluster"| MaaS
-    KC -.->|"JWT validation"| MaaS
-    Vault -.->|"Secret sync"| PG
-    MaaS --> Guard
-    Guard --> EPP
-    EPP --> vLLM
-    MaaS --> Prom
+    Client(["API Consumer"]) --> MaaS
+    Client -->|"multi-cluster path"| AIGw
+    AIGw -->|"TLS origination<br/>to model route"| vLLM
+    MaaS -->|"auth + rate limit"| vLLM
+    Guard -->|"PII filter proxy"| vLLM
+    EPP -.->|"routes to optimal replica"| vLLM
+    OIDC -.->|"validates tokens"| MaaS
+    MaaS -.-> Prom
+    Vault -.->|"syncs secrets to K8s"| Vault
 ```
 
 ### Multi-Cluster Traffic Flow
+
+The AI Gateway routes directly to the model's OpenShift Route on the inference cluster. This provides a single entry point on the CPU cluster but does **not** pass through MaaS auth (that is a separate direct-access path).
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant GW as AI Gateway<br/>(CPU Cluster)
     participant RT as OpenShift Route<br/>(Inference Cluster)
-    participant M as MaaS Gateway
     participant V as vLLM
 
     C->>GW: POST /v1/chat/completions
     GW->>GW: Host header rewrite
     GW->>RT: TLS origination (port 443)
-    RT->>M: Route to MaaS Gateway
-    M->>M: Auth + Rate Limit
-    M->>V: Forward to model
-    V->>M: Response
-    M->>GW: Response
+    RT->>V: Route to vLLM pod
+    V->>GW: Response
     GW->>C: Response
 ```
 
-### Governance Stack
+### Governance Stack (MaaS Direct Access)
+
+When clients access the MaaS gateway directly, requests pass through Authorino (auth) and Limitador (rate limiting):
 
 ```mermaid
 flowchart LR
-    subgraph AuthZ["Authentication & Authorization"]
+    subgraph AuthZ["Authentication"]
         AK["API Keys<br/>(MaaSSubscription)"]
-        OIDC["OIDC JWT<br/>(Keycloak)"]
+        OIDC["OIDC JWT<br/>(external IdP)"]
     end
 
     subgraph RL["Rate Limiting"]
-        TPM["Token Rate Limits<br/>(per subscription)"]
+        TRL["Token Rate Limits<br/>(tokens/hour per subscription)"]
         LIM["Limitador<br/>(enforcement)"]
     end
 
     subgraph OBS["Observability"]
         SM["ServiceMonitors"]
-        DASH["Grafana Dashboard"]
         PROM["Prometheus"]
+        DASH["Dashboard ConfigMap"]
     end
 
     AK --> LIM
     OIDC --> LIM
-    TPM --> LIM
+    TRL --> LIM
     LIM --> SM
     SM --> PROM
     PROM --> DASH
@@ -103,25 +102,45 @@ flowchart LR
 
 ## Prerequisites
 
-- **OpenShift Container Platform** 4.19+ (two clusters recommended for multi-cluster demo)
-- **Red Hat OpenShift AI (RHOAI)** 3.4 with MaaS enabled
-- **Red Hat Connectivity Link (RHCL/Kuadrant)** operator (provides Authorino + Limitador)
-- **GPU node** (NVIDIA) on inference cluster for model serving
-- **Istio/Service Mesh** on gateway cluster (for multi-cluster routing)
-- **(Optional)** Keycloak for OIDC demo
-- **(Optional)** HashiCorp Vault for secret rotation demo
+These must be installed on your cluster(s) **before** running `deploy-all.sh`:
+
+| Prerequisite | Required for | Installed by this repo? |
+|--------------|-------------|------------------------|
+| OpenShift 4.19+ | Platform | No |
+| RHOAI 3.4 operator | MaaS gateway, model serving | No (DSC manifest only) |
+| RHCL/Kuadrant operator | Authorino + Limitador | No |
+| GPU node (NVIDIA) | Model inference | No |
+| Istio/Service Mesh | Multi-cluster routing | No |
+| OIDC provider (Keycloak, Okta, etc.) | OIDC demo | No — bring your own |
+
+The scripts deploy the **application-level** resources (model, subscriptions, guardrails, Vault, ESO, observability) but assume the platform operators are already present.
 
 ---
 
 ## Quick Start
 
+### 0. Platform Setup (one-time)
+
+Ensure the following operators are installed on your inference cluster:
+- Red Hat OpenShift AI 3.4
+- Red Hat Connectivity Link (Kuadrant)
+- NVIDIA GPU Operator
+
+For multi-cluster, also install Istio/Service Mesh on the gateway cluster.
+
 ### 1. Configure
 
 ```bash
 cp scripts/config.env.example scripts/config.env
-# Edit config.env with your cluster details
+# Edit config.env with your cluster details — all REPLACE_WITH_* values must be filled
 vim scripts/config.env
 ```
+
+Key values to fill:
+- `CTX_INFERENCE` / `CTX_GATEWAY` — your `oc` context names
+- `REMOTE_MODEL_HOSTNAME` — the model's OpenShift Route hostname (for multi-cluster)
+- `VLLM_SERVICE` — the KServe workload service (e.g., `qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000`)
+- `KEYCLOAK_HOST` — your OIDC provider hostname (if using OIDC)
 
 ### 2. Deploy
 
@@ -147,25 +166,25 @@ maas-demo/
 │   ├── poc-validation.md                  # PoC success criteria alignment
 │   └── gaps-and-considerations.md         # Production vs demo differences
 ├── manifests/
-│   ├── platform/                          # Platform prerequisites
-│   │   ├── rhoai-instance/               # DataScienceCluster with MaaS
-│   │   ├── maas-postgres/                # PostgreSQL backend
+│   ├── platform/                          # Platform-level resources
+│   │   ├── rhoai-instance/               # DataScienceCluster with MaaS enabled
+│   │   ├── maas-postgres/                # PostgreSQL (MaaS state store)
 │   │   ├── monitoring-config/            # User workload monitoring
 │   │   └── observability/                # ServiceMonitors + Dashboard
 │   ├── model/                            # Model deployment + subscriptions
 │   ├── llm-d/                            # Endpoint Picker Pod (intelligent routing)
 │   ├── ai-gateway/                       # Multi-cluster Istio routing
-│   ├── guardrails/                       # Content safety gateway
-│   ├── oidc/                             # OIDC/SSO AuthConfig
-│   └── vault-eso/                        # Vault + External Secrets
+│   ├── guardrails/                       # Content safety gateway (PII regex)
+│   ├── oidc/                             # OIDC AuthConfig (BYO IdP)
+│   └── vault-eso/                        # Vault + External Secrets (pattern demo)
 ├── scripts/
 │   ├── config.env.example                # Configuration template
-│   ├── deploy-all.sh                     # One-shot deploy
+│   ├── deploy-all.sh                     # Deployment script (imperative ordering)
 │   ├── validate-poc.sh                   # PoC validation (all criteria)
 │   └── teardown.sh                       # Clean removal
-└── profiles/                             # Kustomize deployment profiles
-    ├── single-cluster/                   # Everything on one cluster
-    └── multi-cluster/                    # Split gateway + inference
+└── profiles/                             # Kustomize overlays (for ArgoCD users)
+    ├── single-cluster/
+    └── multi-cluster/
 ```
 
 ---
@@ -188,37 +207,37 @@ Deploys the gateway components on one cluster and inference on another.
 # or: ./scripts/deploy-all.sh --profile multi-cluster
 ```
 
-> **Note:** The `profiles/` directory provides Kustomize overlays for ArgoCD/GitOps users
-> who prefer declarative deployment. The scripts handle ordering imperatively and are
-> recommended for initial setup and validation.
+> **Note:** The `profiles/` directory provides Kustomize overlays for ArgoCD/GitOps users.
+> The scripts handle ordering imperatively and are recommended for initial setup.
+> Profiles contain `REPLACE_WITH_*` placeholders that must be substituted before use with `oc apply -k`.
 
 ---
 
 ## Key Endpoints (after deployment)
 
-| Endpoint | URL Pattern | Auth |
-|----------|-------------|------|
-| MaaS Gateway | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None (configurable) |
-| Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None |
-| Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None |
+| Endpoint | URL Pattern | Auth | Notes |
+|----------|-------------|------|-------|
+| MaaS Gateway | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC | Created by RHOAI operator |
+| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None | Routes directly to model (bypasses MaaS auth) |
+| Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No PII filtering |
+| Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 
 ---
 
 ## PoC Success Criteria
 
-This demo validates all 8 success criteria from the AI Bridge PoC:
+This demo validates the AI Bridge PoC success criteria:
 
-1. **Per-use-case auth** — API keys scoped to subscriptions ✅
-2. **Token rate limiting** — TPM/RPM per subscription ✅
-3. **Usage tracking** — Prometheus metrics per subscription ✅
-4. **Tiered access** — 3 tiers with independent limits ✅
-5. **OIDC/SSO** — Keycloak JWT + role-based access ✅
-6. **Observability** — Dashboards + ServiceMonitors ✅
-7. **API compatibility** — Standard OpenAI format ✅
-8. **Secret rotation** — Vault + ESO zero-downtime sync ✅
+1. **Per-use-case auth** — MaaSSubscription CRs with per-team API keys ✅
+2. **Token rate limiting** — tokens/hour limits per subscription ✅
+3. **Usage tracking** — Prometheus ServiceMonitors for auth/rate-limit metrics ✅
+4. **Tiered access** — 3 tiers (500K/100K/50K tokens/hr) with independent limits ✅
+5. **OIDC/SSO** — AuthConfig validates JWT from external IdP ✅
+6. **Observability** — Dashboard ConfigMap + ServiceMonitors ✅
+7. **API compatibility** — Standard OpenAI `/v1/chat/completions` format ✅
+8. **Secret rotation pattern** — Vault → ESO → K8s Secret (30s refresh) ✅
 
-See [docs/poc-validation.md](docs/poc-validation.md) for detailed evidence.
+See [docs/poc-validation.md](docs/poc-validation.md) for detailed evidence and caveats.
 
 ---
 

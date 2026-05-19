@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document describes the AI Bridge demonstration environment built on Red Hat OpenShift AI (RHOAI) 3.4. The environment validates the Models-as-a-Service (MaaS) capabilities across two OpenShift clusters, demonstrating centralized model governance, multi-cluster routing, enterprise identity federation, content safety guardrails, and GitOps-driven lifecycle management.
+This document describes the AI Bridge demonstration environment built on Red Hat OpenShift AI (RHOAI) 3.4. The environment validates the Models-as-a-Service (MaaS) capabilities across one or two OpenShift clusters, demonstrating centralized model governance, multi-cluster routing, enterprise identity federation, content safety guardrails, and observability.
 
 The demo is structured to align with a PoC validation plan covering Stages A (Foundation), B (Governance & Multi-Tenancy), and C (Enterprise Integration).
 
@@ -12,14 +12,13 @@ The demo is structured to align with a PoC validation plan covering Stages A (Fo
 
 ```mermaid
 flowchart TB
-    subgraph GWCluster["Gateway Cluster (CPU)"]
+    subgraph GWCluster["Gateway Cluster (CPU) — optional, for multi-cluster"]
         direction TB
         NS1["Namespace: ai-gateway"]
         AIGw["AI Inference Gateway<br/>(Istio + Gateway API)"]
-        SE["ServiceEntry<br/>(remote model)"]
+        SE["ServiceEntry<br/>(remote model route)"]
         DR["DestinationRule<br/>(TLS origination)"]
         HR["HTTPRoute<br/>(Host rewrite)"]
-        KC["Keycloak<br/>OIDC realm: ai-bridge"]
         VaultNS["Namespace: vault-dev"]
         VaultPod["Vault (dev mode)"]
         ESO["External Secrets Operator"]
@@ -29,17 +28,17 @@ flowchart TB
         AIGw --> DR
         AIGw --> HR
         VaultNS --> VaultPod
-        ESO -->|"sync secrets"| VaultPod
+        ESO -->|"sync to K8s Secrets"| VaultPod
     end
 
     subgraph InfCluster["Inference Cluster (GPU)"]
         direction TB
         NS2["Namespace: llm-inference"]
-        MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)"]
+        MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)<br/>— created by RHOAI operator"]
         AuthP["AuthPolicy<br/>(API key + OIDC)"]
         RLP["TokenRateLimitPolicy<br/>(per subscription)"]
         NS3["Namespace: ai-guardrails"]
-        Guard["Guardrails Gateway<br/>(vLLM Orchestrator + Proxy)"]
+        Guard["Guardrails Gateway<br/>(PII regex detection)"]
         EPP["llm-d EPP<br/>(InferencePool + InferenceModel)"]
         Model["vLLM Pod<br/>(Qwen2.5-7B-Instruct)"]
         PG["PostgreSQL<br/>(maas-db namespace)"]
@@ -49,18 +48,22 @@ flowchart TB
         MaaS --> AuthP
         MaaS --> RLP
         NS3 --> Guard
-        Guard --> EPP
-        EPP --> Model
+        EPP -.-> Model
         MaaS -.-> PG
         MaaS -.-> Mon
     end
 
-    Client(["API Consumer"]) -->|"Direct access"| MaaS
-    Client -->|"Multi-cluster"| AIGw
-    AIGw -->|"TLS origination<br/>port 443"| MaaS
-    KC -.->|"JWT issuer"| AuthP
-    ESO -.->|"rotated secrets"| PG
+    ExtIdP(["External OIDC Provider<br/>(Keycloak / Okta / Azure AD)"])
+
+    Client(["API Consumer"]) -->|"Direct access<br/>(auth + rate limit)"| MaaS
+    Client -->|"Multi-cluster path"| AIGw
+    AIGw -->|"TLS origination<br/>to model OpenShift Route"| Model
+    MaaS -->|"authenticated traffic"| Model
+    Guard -->|"PII filter proxy"| Model
+    ExtIdP -.->|"JWT issuer endpoint"| AuthP
 ```
+
+**Important:** The multi-cluster AI Gateway routes directly to the model's OpenShift Route on the inference cluster. It does **not** pass through the MaaS auth/rate-limiting layer. These are two independent access paths.
 
 ---
 
@@ -69,15 +72,14 @@ flowchart TB
 | Component | Version | Cluster |
 |-----------|---------|---------|
 | OpenShift Container Platform | 4.19+ | Both |
-| Red Hat OpenShift AI (RHOAI) | 3.4.0 | Both |
-| Red Hat Connectivity Link (RHCL/Kuadrant) | 1.3.x | Both |
-| Authorino | 1.3.0 | Both |
-| Limitador | Managed by RHCL | Both |
-| NVIDIA GPU Operator | 25.x | Inference cluster |
-| Service Mesh (Istio) | 3.x | Gateway cluster |
-| Keycloak (RHBK) | Operator-managed | Gateway cluster |
-| HashiCorp Vault | 1.17 (dev mode) | Gateway cluster |
-| External Secrets Operator | 1.1.0 (Red Hat) | Gateway cluster |
+| Red Hat OpenShift AI (RHOAI) | 3.4.x | Inference |
+| Red Hat Connectivity Link (RHCL/Kuadrant) | 1.3.x | Inference |
+| Authorino | Managed by RHCL | Inference |
+| Limitador | Managed by RHCL | Inference |
+| NVIDIA GPU Operator | 25.x | Inference |
+| Service Mesh (Istio) | 3.x | Gateway (multi-cluster only) |
+| HashiCorp Vault | 1.17 (dev mode) | Gateway |
+| External Secrets Operator | Red Hat ESO | Gateway |
 
 ---
 
@@ -91,15 +93,15 @@ flowchart TB
 
 **What's deployed:**
 - `DataScienceCluster` with `modelsAsService: Managed`
-- PostgreSQL backend storing subscriptions, API keys, and usage data
-- `maas-default-gateway` Gateway resource (Envoy-based, TLS-terminated)
+- PostgreSQL backend (`maas-db` namespace) storing MaaS internal state (subscriptions, key hashes, usage)
+- `maas-default-gateway` Gateway resource created by the RHOAI operator
 - Authorino handling ext-auth decisions via gRPC
 
 **Demo flow:**
-1. Admin creates a subscription for a team
+1. Admin creates a `MaaSSubscription` for a team
 2. Engineer generates an API key scoped to that subscription
 3. Requests to the MaaS endpoint are authenticated, rate-limited, and metered
-4. Usage data is recorded per-subscription in PostgreSQL and exposed via Prometheus
+4. Usage data is recorded per-subscription and exposed via Prometheus
 
 #### A2. Model Serving (Qwen2.5-7B-Instruct)
 
@@ -120,31 +122,32 @@ curl -H "Authorization: Bearer <api-key>" \
 
 #### A3. llm-d Intelligent Routing
 
-**What it is:** The llm-d Endpoint Picker Pod provides inference-aware request routing using the Gateway API `InferencePool` and `InferenceModel` CRDs. It routes requests to the optimal vLLM replica based on load, KV cache utilization, and model availability.
+**What it is:** The llm-d Endpoint Picker Pod provides inference-aware request routing using the Gateway API `InferencePool` and `InferenceModel` CRDs from `inference.networking.x-k8s.io`. It routes requests to the optimal vLLM replica based on load, KV cache utilization, and model availability.
 
 **What's deployed:**
-- `InferencePool` (GA API: `inference.networking.x-k8s.io/v1`)
+- `InferencePool` (API group: `inference.networking.x-k8s.io/v1alpha2`)
 - `InferenceModel` linking model name to the pool
-- EPP Deployment with proper RBAC for the inference API group
+- EPP Deployment with proper RBAC
 
 #### A4. Multi-Cluster Routing
 
-**What it is:** A centralized AI Gateway on one cluster (CPU) routes inference requests to model endpoints on a remote GPU cluster via Istio service mesh, providing a single entry point for consumers regardless of where models are physically deployed.
+**What it is:** A centralized AI Gateway on one cluster (CPU) routes inference requests to model endpoints on a remote GPU cluster via Istio, providing a single entry point for consumers regardless of where models are physically deployed.
+
+**Important caveat:** This routing path goes directly to the model's OpenShift Route. It does **not** pass through the MaaS governance layer (auth/rate-limiting). It demonstrates network connectivity and Istio routing patterns.
 
 **What's deployed (gateway cluster):**
 - Istio `Gateway` (listening on port 80 HTTP)
-- `HTTPRoute` with Host header rewrite for the remote cluster
-- `ServiceEntry` declaring the remote model endpoint as an external mesh service
+- `HTTPRoute` with Host header rewrite for the remote cluster's route
+- `ServiceEntry` declaring the remote model route as an external mesh service
 - `DestinationRule` configuring TLS origination (SIMPLE mode)
-- `ExternalName` Service pointing to the remote cluster's route hostname
 
 **Traffic flow:**
 
 ```mermaid
 flowchart LR
     C["Client"] --> GW["AI Gateway<br/>(port 80)"]
-    GW -->|"TLS origination"| Route["OpenShift Route<br/>(port 443)"]
-    Route --> Model["vLLM<br/>(Inference Cluster)"]
+    GW -->|"TLS origination"| Route["Model OpenShift Route<br/>(port 443)"]
+    Route --> Model["vLLM Pod<br/>(Inference Cluster)"]
 ```
 
 ---
@@ -153,19 +156,18 @@ flowchart LR
 
 #### B1. Per-Use-Case Authentication (API Keys + Subscriptions)
 
-Each team/use-case gets its own subscription with independently managed API keys. Keys are scoped to specific models and can be created, rotated, and revoked instantly.
+Each team/use-case gets its own subscription with independently managed API keys. Keys are scoped to specific models and can be created, rotated, and revoked.
 
 **What's deployed:**
 - `MaaSSubscription` CRs for three teams (premium, standard, basic tiers)
-- API keys stored in PostgreSQL, validated by Authorino on each request
-- Revocation takes effect immediately (no cache)
+- API keys managed via MaaS CLI/API, hashes stored in PostgreSQL, validated by Authorino on each request
 
 #### B2. Token-Based Rate Limiting
 
-Rate limits enforced per-subscription based on tokens-per-minute (TPM). Token-based limiting accounts for prompt size, preventing large-prompt requests from consuming disproportionate capacity.
+Rate limits enforced per-subscription using **tokens per hour**. Token-based limiting accounts for prompt size, preventing large-prompt requests from consuming disproportionate capacity.
 
 **What's deployed:**
-- `tokenRateLimits` configured per subscription tier
+- `tokenRateLimits` configured per subscription tier in `MaaSSubscription` CRs
 - Limitador enforcing counters per subscription ID
 - Prometheus metrics for rate limit events
 
@@ -176,7 +178,7 @@ Rate limits enforced per-subscription based on tokens-per-minute (TPM). Token-ba
 
 #### B3. Tiered Access
 
-Multiple subscription tiers with independent rate limit policies. Each tier gets its own throughput allocation and priority level.
+Multiple subscription tiers with independent rate limit policies. Each tier gets its own throughput allocation.
 
 #### B4. Usage Tracking
 
@@ -193,34 +195,36 @@ Per-subscription request count and token usage visible via Prometheus metrics.
 
 #### C1. OIDC / SSO Integration
 
-The AI Bridge federates with an enterprise identity provider (Keycloak or any OIDC-compliant IdP) to support token-based authentication alongside API keys.
+The AI Bridge can federate with an enterprise identity provider (Keycloak, Okta, Azure AD, or any OIDC-compliant IdP) to support token-based authentication alongside API keys.
 
 **What's deployed (in this repo):**
 - Authorino `AuthConfig` validating JWTs from the configured OIDC issuer (`manifests/oidc/authconfig.yaml`)
 - Dual authentication: both API keys and OIDC Bearer tokens accepted
 
-**External prerequisite (bring your own):**
-- Keycloak (or any OIDC provider) with:
-  - A realm (e.g., `ai-bridge`)
-  - An OIDC client (`ai-bridge-gateway`) with `client_credentials` grant enabled
-  - Roles: `ai-admin`, `ai-engineer` assigned to users
-- Set `KEYCLOAK_HOST` in `scripts/config.env` to your IdP's hostname
-- For Keycloak on OpenShift, install the RHBK operator and create a `Keycloak` CR + `KeycloakRealmImport`
+**External prerequisite (NOT deployed by this repo):**
+- An OIDC-compliant identity provider with:
+  - A realm/tenant (e.g., `ai-bridge`)
+  - An OIDC client with `client_credentials` and/or `authorization_code` grant enabled
+  - Roles: `ai-admin`, `ai-engineer` assigned to users/clients
+- Set `KEYCLOAK_HOST` in `scripts/config.env` to your IdP's issuer hostname
+- The `AuthConfig` manifest requires the `REPLACE_WITH_KEYCLOAK_ISSUER_URL` placeholder to be filled
 
 #### C2. Secret Management (External Secrets Operator + Vault)
 
-Demonstrates zero-downtime credential rotation by syncing secrets from HashiCorp Vault to Kubernetes Secrets via the External Secrets Operator.
+Demonstrates the **pattern** of zero-downtime credential rotation by syncing secrets from HashiCorp Vault to Kubernetes Secrets via the External Secrets Operator.
 
 **What's deployed:**
-- HashiCorp Vault (dev mode) with KV v2 secrets engine
+- HashiCorp Vault (dev mode, in-memory) with KV v2 secrets engine
 - Vault secrets: `ai-bridge/api-keys`, `ai-bridge/db-credentials`
 - Red Hat External Secrets Operator
 - `SecretStore` pointing to Vault with token auth
 - `ExternalSecret` resources syncing Vault → K8s Secrets (30-second refresh)
 
+**Current limitation:** The K8s Secrets created by ESO are not currently consumed by the MaaS gateway or PostgreSQL. This demonstrates the rotation infrastructure pattern but is not wired end-to-end. Production use would mount these secrets into the relevant workloads.
+
 #### C3. Observability
 
-Live dashboards showing inference metrics per subscription with rate limit event visibility.
+Dashboards showing inference metrics per subscription with rate limit event visibility.
 
 **Key metrics:**
 - `authorino_auth_server_evaluator_total` — auth decisions per subscription
@@ -230,15 +234,20 @@ Live dashboards showing inference metrics per subscription with rate limit event
 
 #### C4. Guardrails Gateway (Content Safety)
 
-An inline content safety filter that inspects requests and responses for PII, prompt injection, and other policy violations.
+An inline content safety filter that inspects requests and responses for PII using **regex-based pattern matching**.
 
 **What's deployed:**
-- vLLM Orchestrator Gateway (Rust-based, port 8090)
+- Guardrails Gateway container (port 8090)
 - Orchestrator proxy sidecar (Python, port 8085) connecting to the vLLM backend
-- Regex-based detectors for: email, SSN, credit card numbers
+- **Regex-based** detectors for: email addresses, SSN patterns, credit card numbers
 - Two endpoints:
   - `/passthrough/v1/chat/completions` — no detection, direct proxy
-  - `/pii/v1/chat/completions` — PII detection on input and output
+  - `/pii/v1/chat/completions` — PII regex detection on input and output
+
+**What is NOT implemented:**
+- LLM-based prompt injection detection
+- Semantic content analysis
+- TrustyAI integration (requires separate orchestrator)
 
 ---
 
@@ -249,21 +258,24 @@ An inline content safety filter that inspects requests and responses for PII, pr
 | PVC-based model download (not image pull) | HuggingFace download is more portable across environments |
 | Self-signed TLS for MaaS gateway | Production should use cert-manager with proper CA |
 | Vault dev mode (in-memory) | Demo simplicity; production uses HA Vault with persistent storage |
-| Python orchestrator proxy for guardrails | Lightweight proxy demonstrates the architecture pattern |
+| Python orchestrator proxy for guardrails | Lightweight proxy demonstrates the architecture pattern without requiring full TrustyAI stack |
 | Host header rewrite in HTTPRoute | Required for Istio TLS origination to match remote route hostname |
+| Multi-cluster routes directly to model | Simplifies demo; production would route through MaaS for auth on both paths |
+| ESO secrets not consumed by MaaS | Demonstrates rotation infrastructure; wiring to workloads is environment-specific |
+| Scripts use imperative `oc apply` ordering | Ensures correct deployment sequence; Kustomize profiles available for declarative use |
 
 ---
 
 ## Endpoints Reference
 
-| Endpoint | URL Pattern | Auth |
-|----------|-------------|------|
-| MaaS Gateway (inference) | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC token |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None (configurable) |
-| Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None |
-| Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None |
-| Keycloak OIDC | `https://<KEYCLOAK_HOST>/realms/ai-bridge` | admin/password |
-| Vault API | `http://vault.vault-dev.svc:8200` (cluster-internal) | Token |
+| Endpoint | URL Pattern | Auth | Notes |
+|----------|-------------|------|-------|
+| MaaS Gateway (inference) | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC token | Created by RHOAI operator |
+| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | None | Direct to model, bypasses MaaS |
+| Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No filtering |
+| Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
+| OIDC Provider | `https://<KEYCLOAK_HOST>/realms/<realm>` | admin creds | External — not deployed here |
+| Vault API | `http://vault.vault-dev.svc:8200` (cluster-internal) | Token: `REPLACE_WITH_VAULT_TOKEN` | Dev mode only |
 
 ---
 
@@ -271,11 +283,10 @@ An inline content safety filter that inspects requests and responses for PII, pr
 
 To replicate this in any environment:
 
-1. **RHOAI 3.4** images available (mirrored if disconnected)
+1. **RHOAI 3.4** operator installed and configured
 2. **RHCL operator** installed (Kuadrant/Authorino/Limitador)
-3. **PostgreSQL** instance for MaaS backend
-4. **GPU Operator** with compatible drivers
-5. **cert-manager** for production TLS
-6. **Enterprise IdP** (Okta, Azure AD, Keycloak) for OIDC federation
-7. **HashiCorp Vault** instance for secret management
-8. **Network connectivity** between clusters for multi-cluster routing
+3. **GPU Operator** with compatible NVIDIA drivers
+4. **Istio/Service Mesh** on gateway cluster (multi-cluster only)
+5. **Network connectivity** between clusters for multi-cluster routing
+6. **(Optional)** Enterprise OIDC provider (Keycloak, Okta, Azure AD) for SSO demo
+7. **(Optional)** HashiCorp Vault for secret rotation pattern demo
