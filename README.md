@@ -224,23 +224,6 @@ Deploys the gateway components on one cluster and inference on another.
 
 ---
 
-## PoC Success Criteria
-
-This demo validates the AI Bridge PoC success criteria:
-
-1. **Per-use-case auth** — MaaSSubscription CRs with per-team API keys ✅
-2. **Token rate limiting** — tokens/hour limits per subscription ✅
-3. **Usage tracking** — Prometheus ServiceMonitors for auth/rate-limit metrics ✅
-4. **Tiered access** — 3 tiers (500K/100K/50K tokens/hr) with independent limits ✅
-5. **OIDC/SSO** — AuthConfig validates JWT from external IdP ✅
-6. **Observability** — Dashboard ConfigMap + ServiceMonitors ✅
-7. **API compatibility** — Standard OpenAI `/v1/chat/completions` format ✅
-8. **Secret rotation pattern** — Vault → ESO → K8s Secret (30s refresh) ✅
-
-See [docs/poc-validation.md](docs/poc-validation.md) for detailed evidence and caveats.
-
----
-
 ## License
 
 Apache License 2.0
