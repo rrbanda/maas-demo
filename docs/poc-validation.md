@@ -17,7 +17,7 @@ This document maps each PoC success criterion to validated evidence from the dem
 | 7 | API compatibility | Standard OpenAI API. Base URL change only. | ✅ PASS | `/v1/models` and `/v1/chat/completions` return standard OpenAI schema. |
 | 8 | Secret rotation pattern | Vault + ESO rotation with zero downtime. | ✅ PASS | SecretStore validated. ExternalSecrets synced (30s refresh). K8s Secrets updated without pod restart. |
 | -- | Guardrails | Content safety filtering (PII regex detection). | ✅ BONUS | `/pii/` endpoint detects SSN/email/CC patterns via regex. `/passthrough` bypasses. |
-| -- | Multi-cluster | Central gateway routes to remote GPU cluster. | ✅ BONUS | Istio gateway routes via TLS origination to model on remote cluster (bypasses MaaS auth). |
+| -- | Multi-cluster | Central gateway routes to remote inference cluster. | ✅ BONUS | Istio gateway routes via TLS origination to model on inference cluster (bypasses MaaS auth). |
 
 ---
 
@@ -114,13 +114,13 @@ ai-bridge-db-credentials   SecretSynced   True
 
 ### Bonus — Multi-Cluster Routing
 
-Routes directly to the model's OpenShift Route (bypasses MaaS auth layer):
+Routes directly to the model's OpenShift Route on the inference cluster (bypasses MaaS auth layer):
 
 ```bash
 $ curl http://<AI_GW_HOST>:80/v1/chat/completions \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"What is 1+1?"}],"max_tokens":20}'
 → {"model": "qwen25-7b-instruct", "choices": [{"message": {"content": "1+1 equals 2."}}]}
-  (request enters on gateway cluster, inference runs on GPU cluster)
+  (request enters on gateway cluster, inference runs on inference cluster)
 ```
 
 ### Bonus — Guardrails (PII Regex Detection)

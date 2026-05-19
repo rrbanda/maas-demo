@@ -12,7 +12,7 @@ The demo is structured to align with a PoC validation plan covering Stages A (Fo
 
 ```mermaid
 flowchart TB
-    subgraph GWCluster["Gateway Cluster (CPU) — optional, for multi-cluster"]
+    subgraph GWCluster["Gateway Cluster — optional, for multi-cluster"]
         direction TB
         NS1["Namespace: ai-gateway"]
         AIGw["AI Inference Gateway<br/>(Istio + Gateway API)"]
@@ -31,7 +31,7 @@ flowchart TB
         ESO -->|"sync to K8s Secrets"| VaultPod
     end
 
-    subgraph InfCluster["Inference Cluster (GPU)"]
+    subgraph InfCluster["Inference Cluster"]
         direction TB
         NS2["Namespace: llm-inference"]
         MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)<br/>— created by RHOAI operator"]
@@ -72,11 +72,11 @@ flowchart TB
 | Component | Version | Cluster |
 |-----------|---------|---------|
 | OpenShift Container Platform | 4.19+ | Both |
-| Red Hat OpenShift AI (RHOAI) | 3.4.x | Inference |
-| Red Hat Connectivity Link (RHCL/Kuadrant) | 1.3.x | Inference |
-| Authorino | Managed by RHCL | Inference |
-| Limitador | Managed by RHCL | Inference |
-| NVIDIA GPU Operator | 25.x | Inference |
+| Red Hat OpenShift AI (RHOAI) | 3.4.x | Both |
+| Red Hat Connectivity Link (RHCL/Kuadrant) | 1.3.x | Both |
+| Authorino | Managed by RHCL | Both |
+| Limitador | Managed by RHCL | Both |
+| NVIDIA GPU Operator | 25.x | Both |
 | Service Mesh (Istio) | 3.x | Gateway (multi-cluster only) |
 | HashiCorp Vault | 1.17 (dev mode) | Gateway |
 | External Secrets Operator | Red Hat ESO | Gateway |
@@ -125,15 +125,15 @@ curl -H "Authorization: Bearer <api-key>" \
 **What it is:** The llm-d Endpoint Picker Pod provides inference-aware request routing using the Gateway API `InferencePool` and `InferenceModel` CRDs from `inference.networking.x-k8s.io`. It routes requests to the optimal vLLM replica based on load, KV cache utilization, and model availability.
 
 **What's deployed:**
-- `InferencePool` (API group: `inference.networking.x-k8s.io/v1alpha2`)
-- `InferenceModel` linking model name to the pool
-- EPP Deployment with proper RBAC
+- `InferencePool` (API: `inference.networking.k8s.io/v1` — GA)
+- `InferenceModel` (API: `inference.networking.x-k8s.io/v1alpha2`)
+- EPP Deployment with proper RBAC for both API groups
 
 #### A4. Multi-Cluster Routing
 
-**What it is:** A centralized AI Gateway on one cluster (CPU) routes inference requests to model endpoints on a remote GPU cluster via Istio, providing a single entry point for consumers regardless of where models are physically deployed.
+**What it is:** A centralized AI Gateway on one cluster routes inference requests to model endpoints on a remote cluster via Istio, providing a single entry point for consumers regardless of where models are physically deployed.
 
-**Important caveat:** This routing path goes directly to the model's OpenShift Route. It does **not** pass through the MaaS governance layer (auth/rate-limiting). It demonstrates network connectivity and Istio routing patterns.
+**Important caveat:** This routing path goes directly to the model's OpenShift Route on the inference cluster. It does **not** pass through the MaaS governance layer (auth/rate-limiting). It demonstrates network connectivity and Istio routing patterns.
 
 **What's deployed (gateway cluster):**
 - Istio `Gateway` (listening on port 80 HTTP)
@@ -146,8 +146,8 @@ curl -H "Authorization: Bearer <api-key>" \
 ```mermaid
 flowchart LR
     C["Client"] --> GW["AI Gateway<br/>(port 80)"]
-    GW -->|"TLS origination"| Route["Model OpenShift Route<br/>(port 443)"]
-    Route --> Model["vLLM Pod<br/>(Inference Cluster)"]
+    GW -->|"TLS origination"| Route["Model OpenShift Route<br/>(port 443, Inference Cluster)"]
+    Route --> Model["vLLM Pod"]
 ```
 
 ---
@@ -283,9 +283,9 @@ An inline content safety filter that inspects requests and responses for PII usi
 
 To replicate this in any environment:
 
-1. **RHOAI 3.4** operator installed and configured
-2. **RHCL operator** installed (Kuadrant/Authorino/Limitador)
-3. **GPU Operator** with compatible NVIDIA drivers
+1. **RHOAI 3.4** operator installed on both clusters
+2. **RHCL operator** installed (Kuadrant/Authorino/Limitador) on both clusters
+3. **NVIDIA GPU Operator** on both clusters
 4. **Istio/Service Mesh** on gateway cluster (multi-cluster only)
 5. **Network connectivity** between clusters for multi-cluster routing
 6. **(Optional)** Enterprise OIDC provider (Keycloak, Okta, Azure AD) for SSO demo

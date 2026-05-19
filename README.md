@@ -21,13 +21,13 @@ Demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red H
 
 ```mermaid
 flowchart TB
-    subgraph GW["Gateway Cluster (CPU) — optional"]
+    subgraph GW["Gateway Cluster — optional"]
         direction TB
         AIGw["AI Gateway<br/>(Istio + Gateway API)"]
         Vault["HashiCorp Vault<br/>+ ESO"]
     end
 
-    subgraph INF["Inference Cluster (GPU)"]
+    subgraph INF["Inference Cluster"]
         direction TB
         MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)<br/>created by RHOAI operator"]
         Guard["Guardrails Gateway<br/>(PII Detection)"]
@@ -51,12 +51,12 @@ flowchart TB
 
 ### Multi-Cluster Traffic Flow
 
-The AI Gateway routes directly to the model's OpenShift Route on the inference cluster. This provides a single entry point on the CPU cluster but does **not** pass through MaaS auth (that is a separate direct-access path).
+The AI Gateway routes directly to the model's OpenShift Route on the inference cluster. This provides a single entry point on the gateway cluster but does **not** pass through MaaS auth (that is a separate direct-access path).
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as AI Gateway<br/>(CPU Cluster)
+    participant GW as AI Gateway<br/>(Gateway Cluster)
     participant RT as OpenShift Route<br/>(Inference Cluster)
     participant V as vLLM
 
@@ -109,7 +109,7 @@ These must be installed on your cluster(s) **before** running `deploy-all.sh`:
 | OpenShift 4.19+ | Platform | No |
 | RHOAI 3.4 operator | MaaS gateway, model serving | No (DSC manifest only) |
 | RHCL/Kuadrant operator | Authorino + Limitador | No |
-| GPU node (NVIDIA) | Model inference | No |
+| NVIDIA GPU Operator | Model inference (both clusters have GPUs) | No |
 | Istio/Service Mesh | Multi-cluster routing | No |
 | OIDC provider (Keycloak, Okta, etc.) | OIDC demo | No — bring your own |
 

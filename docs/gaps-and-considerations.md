@@ -16,11 +16,11 @@ This document outlines the differences between this demo environment and a produ
 | Vault secrets | ESO syncs to K8s Secrets (not consumed by MaaS) | Secrets mounted into relevant workloads | Demonstrates rotation pattern; wiring is environment-specific |
 | Vault mode | Dev mode (in-memory, ephemeral) | Production HA Vault with persistent storage | Architecture identical; only deployment mode differs |
 | Rate limiting | Configured in manifests (tokens/hour) | Enforced with real traffic patterns | Limitador counters active; production tuning needed for actual values |
-| Multi-cluster | AI Gateway routes directly to model (bypasses MaaS auth) | Route through MaaS for unified auth on all paths | Demo proves connectivity; production adds auth on multi-cluster path |
+| Multi-cluster | AI Gateway on gateway cluster routes to model on inference cluster (bypasses MaaS auth) | Route through MaaS for unified auth on all paths | Demo proves connectivity; production adds auth on multi-cluster path |
 | Observability | Prometheus + ServiceMonitors + Dashboard ConfigMap | Grafana/Perses dashboards + alerting + federation | Dashboard JSON ready; needs Grafana instance and alert rules |
 | Guardrails | Regex-based PII detection only | LLM-powered content analysis + TrustyAI | Demo proves architecture pattern; production adds ML-based detectors |
 | API management | Direct access to AI Bridge | End users → API Gateway (e.g., Apigee) → AI Bridge → Model | Architecture validated; API gateway just points to AI Bridge URL |
-| GPU | Single GPU (demo) | NVIDIA A100/H100 (production scale) | Model serving pattern identical; only GPU type/count changes |
+| GPU | GPUs on both clusters (demo scale) | NVIDIA A100/H100 (production scale) | Model serving pattern identical; only GPU type/count changes |
 
 ---
 
