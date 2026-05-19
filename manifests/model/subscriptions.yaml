@@ -3,7 +3,7 @@ apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSSubscription
 metadata:
   name: team-a-ml-engineering
-  namespace: llm-inference
+  namespace: models-as-a-service
   labels:
     app.kubernetes.io/name: qwen25-7b-instruct
     app.kubernetes.io/component: governance
@@ -26,7 +26,7 @@ apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSSubscription
 metadata:
   name: team-b-data-science
-  namespace: llm-inference
+  namespace: models-as-a-service
   labels:
     app.kubernetes.io/name: qwen25-7b-instruct
     app.kubernetes.io/component: governance
@@ -49,7 +49,7 @@ apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSSubscription
 metadata:
   name: team-c-app-developers
-  namespace: llm-inference
+  namespace: models-as-a-service
   labels:
     app.kubernetes.io/name: qwen25-7b-instruct
     app.kubernetes.io/component: governance
