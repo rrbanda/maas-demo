@@ -8,6 +8,7 @@ resources:
   - ../../manifests/platform/rhoai-instance
   - ../../manifests/platform/maas-postgres
   - ../../manifests/platform/observability
+  - ../../manifests/platform/authorino-tls
   # Model
   - ../../manifests/model
   # llm-d

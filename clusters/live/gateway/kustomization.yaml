@@ -1,0 +1,45 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../profiles/multi-cluster/gateway-cluster
+patches:
+  # ServiceEntry — remote inference cluster hosts
+  - target:
+      kind: ServiceEntry
+      name: remote-inference-cluster
+    patch: |-
+      - op: replace
+        path: /spec/hosts/0
+        value: qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  # Service (ExternalName) — externalName
+  - target:
+      kind: Service
+      name: inference-backend
+    patch: |-
+      - op: replace
+        path: /spec/externalName
+        value: qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  # DestinationRule — host
+  - target:
+      kind: DestinationRule
+      name: remote-inference-tls
+    patch: |-
+      - op: replace
+        path: /spec/host
+        value: qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  # HTTPRoute — Host header rewrite
+  - target:
+      kind: HTTPRoute
+      name: multi-cluster-inference
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/filters/0/requestHeaderModifier/set/0/value
+        value: qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  # AuthPolicy — Keycloak issuer URL
+  - target:
+      kind: AuthPolicy
+      name: ai-gateway-oidc-auth
+    patch: |-
+      - op: replace
+        path: /spec/rules/authentication/keycloak-jwt/jwt/issuerUrl
+        value: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge

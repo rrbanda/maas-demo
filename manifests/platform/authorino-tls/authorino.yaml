@@ -1,0 +1,13 @@
+apiVersion: operator.authorino.kuadrant.io/v1beta1
+kind: Authorino
+metadata:
+  name: authorino
+  namespace: kuadrant-system
+spec:
+  clusterWide: true
+  supersedingHostSubsets: true
+  listener:
+    tls:
+      enabled: true
+      certSecretRef:
+        name: authorino-tls
