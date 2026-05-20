@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-This document describes the AI Bridge demonstration environment built on Red Hat OpenShift AI (RHOAI) 3.4. The environment validates the Models-as-a-Service (MaaS) capabilities across one or two OpenShift clusters, demonstrating centralized model governance, multi-cluster routing, enterprise identity federation, content safety guardrails, and observability.
+This document describes the AI Bridge demonstration environment built on Red Hat OpenShift AI (RHOAI) 3.4. The environment validates the Models-as-a-Service (MaaS) capabilities using two OpenShift clusters: a gateway cluster (ingress/auth) and an inference cluster (model serving + MaaS governance).
 
-The demo is structured to align with a PoC validation plan covering Stages A (Foundation), B (Governance & Multi-Tenancy), and C (Enterprise Integration).
+The demo is structured to align with a PoC validation plan covering Stages A (Foundation) and B (Governance & Multi-Tenancy). Multi-cluster routing (Stage C) is demonstrated as a proof-of-mechanism only — the final multi-cluster topology requires customer input on target architecture.
 
 ---
 
@@ -65,7 +65,11 @@ flowchart TB
     ExtIdP -.->|"JWT issuer endpoint"| AuthP
 ```
 
-**Important:** The multi-cluster AI Gateway enforces OIDC/JWT authentication via Authorino (validating tokens against the local Keycloak instance) before forwarding to the model's OpenShift Route on the inference cluster. Unauthenticated requests receive 401. The direct MaaS path uses API keys; the multi-cluster path uses OIDC tokens — both paths are auth-protected.
+**Important — Two independent auth paths exist in this demo:**
+1. **MaaS path (inference cluster):** API key auth (`sk-oai-*`) validated by Authorino against MaaS subscriptions. This is the official RHOAI 3.4 MaaS governance path with token-based rate limiting.
+2. **Multi-cluster gateway path (gateway cluster):** OIDC/JWT auth validated by a separate Kuadrant AuthPolicy against Keycloak. This is a custom Istio gateway — not part of RHOAI MaaS — that demonstrates cross-cluster routing as a proof of mechanism.
+
+These are separate, independently deployed auth layers. The multi-cluster gateway does NOT pass through the MaaS governance layer (subscriptions/rate limits). In a production topology, these would need to be unified based on the customer's requirements.
 
 ---
 
@@ -152,26 +156,38 @@ curl -H "Authorization: Bearer <api-key>" \
 - `InferenceModel` (API: `inference.networking.x-k8s.io/v1alpha2`)
 - EPP Deployment with proper RBAC for both API groups
 
-#### A4. Multi-Cluster Routing
+#### A4. Multi-Cluster Routing (Proof of Mechanism)
 
-**What it is:** A centralized AI Gateway on one cluster routes inference requests to model endpoints on a remote cluster via Istio, providing a single entry point for consumers regardless of where models are physically deployed.
+**What it is:** A custom Istio-based gateway on a dedicated "ingress" cluster validates OIDC tokens (via Kuadrant AuthPolicy) and forwards authenticated requests to a model endpoint on a remote inference cluster. This proves the _mechanism_ of cross-cluster routing, not a production-ready multi-cluster topology.
 
-**Important caveat:** This routing path goes directly to the model's OpenShift Route on the inference cluster. It does **not** pass through the MaaS governance layer (auth/rate-limiting). It demonstrates network connectivity and Istio routing patterns.
+**What this is NOT:**
+- Not a dynamically managed fleet (no RHACM, Submariner, or Skupper)
+- Not fan-out to multiple inference backends (static 1:1 mapping via ServiceEntry)
+- Not the official RHOAI MaaS gateway — this is a separately deployed Istio gateway
+- Governance (MaaS subscriptions, rate limits) lives on the inference cluster, not on this gateway
+- Auth happens at two layers: OIDC JWT at this gateway, AND MaaS API key auth on the inference cluster (these are independent)
 
 **What's deployed (gateway cluster):**
-- Istio `Gateway` (listening on port 80 HTTP)
-- `HTTPRoute` with Host header rewrite for the remote cluster's route
-- `ServiceEntry` declaring the remote model route as an external mesh service
+- Istio `Gateway` (listening on port 80 HTTP, provisioned via GatewayClass by Sail Operator)
+- `HTTPRoute` routing `/v1/*` to the remote backend
+- Kuadrant `AuthPolicy` validating JWT tokens against Keycloak (`ai-bridge` realm)
+- `ServiceEntry` declaring the remote inference cluster as an external mesh service (static hostname)
 - `DestinationRule` configuring TLS origination (SIMPLE mode)
+- `EnvoyFilter` for SSL context on the upstream connection
 
 **Traffic flow:**
 
 ```mermaid
 flowchart LR
-    C["Client"] --> GW["AI Gateway<br/>(port 80)"]
-    GW -->|"TLS origination"| Route["Model OpenShift Route<br/>(port 443, Inference Cluster)"]
+    C["Client"] --> ELB["AWS ELB"]
+    ELB --> GW["Istio Gateway<br/>(port 80)"]
+    GW -->|"AuthPolicy: JWT check"| Auth["Kuadrant/Authorino"]
+    Auth -->|"Valid token"| SE["ServiceEntry<br/>(static remote host)"]
+    SE -->|"TLS origination"| Route["Inference Cluster<br/>(port 443)"]
     Route --> Model["vLLM Pod"]
 ```
+
+**Customer design decision required:** The final multi-cluster topology (active-active pool, ingress-fan-out, number of inference clusters, governance tier placement) needs to be designed against the customer's actual target architecture.
 
 ---
 
@@ -299,7 +315,8 @@ An inline content safety filter that inspects requests and responses for PII usi
 | Vault dev mode (in-memory) | Demo simplicity; production uses HA Vault with persistent storage |
 | Python orchestrator proxy for guardrails | Lightweight proxy demonstrates the architecture pattern without requiring full TrustyAI stack |
 | Host header rewrite in HTTPRoute | Required for Istio TLS origination to match remote route hostname |
-| Multi-cluster uses OIDC (not API keys) | Gateway cluster validates JWTs locally via Keycloak; production may unify to single auth mechanism |
+| Multi-cluster uses OIDC (not API keys) | Gateway cluster validates JWTs locally via Keycloak; this is independent of MaaS auth. Production topology must unify auth layers |
+| Multi-cluster routing is static | ServiceEntry hardcodes remote cluster; no fleet discovery. Proves mechanism, not production topology |
 | ESO secrets not consumed by MaaS | Demonstrates rotation infrastructure; wiring to workloads is environment-specific |
 | Scripts use imperative `oc apply` ordering | Ensures correct deployment sequence; Kustomize profiles available for declarative use |
 
@@ -310,7 +327,7 @@ An inline content safety filter that inspects requests and responses for PII usi
 | Endpoint | URL Pattern | Auth | Notes |
 |----------|-------------|------|-------|
 | MaaS Gateway (inference) | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC token | Created by RHOAI operator |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | OIDC JWT | Keycloak token required; Authorino validates locally |
+| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | OIDC JWT | Custom Istio gateway (not RHOAI MaaS); static routing to inference cluster; does not pass through MaaS governance |
 | Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No filtering |
 | Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 | OIDC Provider | `https://<KEYCLOAK_HOST>/realms/<realm>` | admin creds | External — not deployed here |

@@ -15,10 +15,13 @@
 > | 3.2 API Key Lifecycle | Stage B | SC-B2: Key generation, rotation, revocation |
 > | 3.3 Token-based Rate Limiting | Stage B | SC-B3: Token-level enforcement, 429 on breach |
 > | 3.4 Observability | Stage B | SC-B4: Usage visibility via built-in dashboard |
-> | 3.5 Multi-cluster Gateway | Stage C | SC-C1: Cross-cluster routing with OIDC validation |
-> | 4.1 Guardrails | Beyond Scope | Bonus demo — not required for PoC success |
+> | 4.1 Guardrails | Beyond Scope | Bonus — not required for PoC success |
+> | 4.2 Multi-cluster Routing | Beyond Scope | Proof-of-mechanism only; final topology requires customer input |
 >
-> **Deployment Profile**: Multi-cluster (gateway cluster + inference cluster). This demonstrates cross-cluster routing and centralized governance — a key differentiator for enterprise deployments.
+> **Deployment Profile**: Multi-cluster (gateway cluster + inference cluster).
+> - **What this demonstrates**: The _mechanism_ of OIDC-authenticated cross-cluster routing via Istio (ServiceEntry + DestinationRule + EnvoyFilter). A dedicated ingress cluster validates JWT tokens and forwards to a remote inference cluster over TLS.
+> - **What this is NOT**: A production-ready multi-cluster topology. The routing is static (hardcoded ServiceEntry), there is no dynamic fleet discovery (no RHACM/Submariner/Skupper), governance (MaaS subscriptions/rate limits) still lives on the inference cluster rather than the ingress tier, and it's a 1:1 mapping (not fan-out to multiple inference clusters).
+> - **Customer note**: Final topology design (active-active pool, ingress-fan-out, governance placement) requires confirmation of the target multi-cluster architecture before engineering.
 
 ---
 
@@ -677,30 +680,45 @@ curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
 
 ---
 
-### 4.2 Multi-Cluster Routing with OIDC Auth
+### 4.2 Multi-Cluster Routing — Proof of Mechanism
 
-**TELL**: In production, the MaaS gateway may run on a separate CPU cluster while models run on GPU clusters across sites. This demo shows multi-cluster routing where the gateway validates OIDC tokens locally, then forwards authenticated requests to a remote model endpoint via TLS.
+**TELL**: This demonstrates the _mechanism_ of cross-cluster routing — not a production-ready multi-cluster topology. A dedicated gateway cluster (no GPUs) validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards authenticated requests to a separate inference cluster over TLS using a static Istio ServiceEntry.
+
+> **Technical reality**:
+> - Routing is configured via a hardcoded `ServiceEntry` (manual IP/hostname of inference cluster)
+> - No dynamic service discovery or fleet management (no RHACM, Submariner, or Skupper)
+> - MaaS governance (subscriptions, rate limits, Tenant) lives on the inference cluster, not the gateway
+> - Auth happens at two layers: OIDC at the gateway (Kuadrant AuthPolicy) AND API key auth at the inference cluster (Authorino/MaaS)
+> - This is a 1:1 gateway→inference mapping, not fan-out to multiple backends
+>
+> **What needs customer input**: Final topology (active-active pool vs. dedicated ingress tier, governance placement, number of inference clusters behind the gateway) must be confirmed before production design.
 
 **SHOW**:
 ```bash
-# Gateway on the CPU cluster routes to model on GPU cluster
-# Unauthenticated request → rejected at gateway
+# Gateway cluster components (no GPUs, routing only):
+# - Istio Gateway with external LoadBalancer
+# - Kuadrant AuthPolicy (JWT validation against Keycloak)
+# - ServiceEntry pointing to remote inference cluster (static config)
+# - DestinationRule for mTLS to remote backend
+# - EnvoyFilter for SSL context
+
+# Unauthenticated request → rejected at gateway (Kuadrant AuthPolicy)
 curl -s -w "HTTP %{http_code}\n" -o /dev/null \
   "http://${AI_GW_HOST}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":5}'
 # Expected: HTTP 401
 
-# Authenticated request → routed cross-cluster to model
+# Authenticated request → gateway validates JWT → forwards to inference cluster
 curl -s "http://${AI_GW_HOST}/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":10}' \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['choices'][0]['message']['content'])"
-# Expected: Model response (request traversed from gateway cluster to inference cluster)
+# Expected: Model response (traversed: client → ELB → Istio GW → ServiceEntry → inference cluster → vLLM)
 ```
 
-**TELL**: The gateway cluster has no GPUs — it only handles auth and routing. The inference cluster has GPUs but no external exposure. Together they demonstrate the production pattern where governance and compute are decoupled.
+**TELL**: This proves the mechanism works — OIDC-authenticated cross-cluster routing via Istio. The gateway cluster has no GPUs (routing/auth only), the inference cluster has GPUs but no direct external exposure. However, this is a static 1:1 configuration, not a dynamically managed multi-cluster fleet. The production topology (how many clusters, where governance lives, active-active vs ingress-fan-out) is a design decision that depends on the customer's actual target architecture.
 
 **Estimated time**: 3 minutes
 
