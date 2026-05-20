@@ -5,5 +5,7 @@ kind: Kustomization
 resources:
   # AI Gateway (multi-cluster routing)
   - ../../../manifests/ai-gateway
+  # Authorino TLS (for OIDC auth enforcement)
+  - ../../../manifests/platform/authorino-tls
   # Vault + ESO
   - ../../../manifests/vault-eso
