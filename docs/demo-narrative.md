@@ -95,7 +95,7 @@ Key rule: MaaSModelRef becomes "Ready" ONLY when:
   1. Tenant exists and is Active
   2. At least one MaaSSubscription references this model
   3. At least one MaaSAuthPolicy covers this model
-  4. The model runtime is healthy (pod Running)
+  4. The model backend is reachable (local pod Running, or ExternalModel endpoint accessible)
 ```
 
 ---
@@ -150,8 +150,8 @@ oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
 ```bash
 # ArgoCD applications managing the stack
 oc get applications.argoproj.io -n openshift-gitops | grep maas-demo
-# Expected: maas-demo-inference (Synced/Healthy) on this cluster
-# On gateway cluster: maas-demo-gateway (Synced/Healthy)
+# Expected: maas-demo-gateway (Synced/Healthy) on Cluster 1 (AI Bridge)
+# On Cluster 2: maas-demo-inference (Synced/Healthy)
 
 # Repository structure
 echo "github.com/rrbanda/maas-demo"
@@ -177,18 +177,20 @@ oc get application maas-demo-inference -n openshift-gitops \
 
 ## 2. PLATFORM + MODEL (Stage A)
 
-### 2.1 RHOAI 3.4 with MaaS Enabled
+### 2.1 RHOAI 3.4 with MaaS Enabled (on AI Bridge — Cluster 1)
 
-**TELL**: RHOAI 3.4 introduces Models-as-a-Service as a governance layer on top of model serving. It turns raw GPU endpoints into managed API products with authentication, rate limiting, and usage tracking. Enabling it is a single field in the `DataScienceCluster` CR.
+**TELL**: RHOAI 3.4 introduces Models-as-a-Service as a governance layer on top of model serving. It turns raw GPU endpoints into managed API products with authentication, rate limiting, and usage tracking. In our setup, MaaS runs on the AI Bridge cluster (Cluster 1) — a dedicated governance cluster with no GPUs. Enabling it is a single field in the `DataScienceCluster` CR.
 
 **SHOW**:
 ```bash
+# === All commands on Cluster 1 (AI Bridge) ===
+
 # MaaS is enabled in the DataScienceCluster CR
 oc get datasciencecluster default-dsc \
   -o jsonpath='{.spec.components.kserve.modelsAsService.managementState}'
 # Expected: Managed
 
-# Platform pods are automatically provisioned
+# Platform pods are automatically provisioned (on AI Bridge, not inference cluster)
 oc get pods -n redhat-ods-applications | grep maas
 # Expected: maas-api-* Running, maas-controller-* Running
 
@@ -207,12 +209,15 @@ oc get tenant default-tenant -n models-as-a-service -o jsonpath='{.spec}' | pyth
 
 ---
 
-### 2.2 Model Deployed and Serving
+### 2.2 Model Deployed and Serving (on Inference Worker — Cluster 2)
 
-**TELL**: A model is deployed using the `LLMInferenceService` CR (API: `serving.kserve.io/v1alpha2`). Once deployed, a `MaaSModelRef` in the `llm-inference` namespace registers it for governance. The model becomes "Ready" only when governance is attached (at least one subscription + auth policy paired) AND the runtime is healthy.
+**TELL**: The model runs on a separate GPU cluster (Cluster 2) — not on the AI Bridge. It is deployed using the `LLMInferenceService` CR and exposed via an OpenShift Route secured with a bearer token. On the AI Bridge (Cluster 1), an `ExternalModel` CR registers this remote model for governance, and a `MaaSModelRef` makes it available to subscriptions. The model becomes "Ready" only when governance is attached (at least one subscription + auth policy) AND the remote endpoint is reachable.
 
 **SHOW**:
 ```bash
+# === On Cluster 2 (Inference Worker) — where the model runs ===
+oc login ${CTX_INFERENCE}
+
 # LLMInferenceService — the model deployment CR
 oc get llminferenceservice -n llm-inference
 # Expected: qwen25-7b-instruct with Ready=True
@@ -221,20 +226,25 @@ oc get llminferenceservice -n llm-inference
 oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
 # Expected: qwen25-7b-instruct-kserve-* 1/1 Running
 
-# MaaSModelRef — governance registration
-oc get maasmodelref qwen25-7b-instruct -n llm-inference \
-  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,ENDPOINT:.status.endpoint'
-# Expected:
-# NAME                 PHASE   ENDPOINT
-# qwen25-7b-instruct   Ready   https://<ELB>/llm-inference/qwen25-7b-instruct
+# Model exposed via Route (this is what the AI Bridge connects to)
+oc get route -n llm-inference
+# Expected: qwen25-7b-inference → qwen25-7b-instruct-kserve-workload-svc:8000
 
-# The MaaSModelRef discovered the gateway endpoint automatically
-oc get maasmodelref qwen25-7b-instruct -n llm-inference \
-  -o jsonpath='{.status.endpoint}'
-# Expected: https://<MAAS_GW_ELB>/llm-inference/qwen25-7b-instruct
+# === On Cluster 1 (AI Bridge) — where governance lives ===
+oc login ${CTX_AI_BRIDGE}
+
+# ExternalModel — registers the remote model
+oc get externalmodel qwen25-7b-instruct -n models-as-a-service \
+  -o custom-columns='NAME:.metadata.name,PROVIDER:.spec.provider,ENDPOINT:.spec.endpoint'
+# Expected: endpoint = qwen25-7b-inference-llm-inference.apps.cluster-4l6x6...
+
+# MaaSModelRef — governance wrapper, must be Ready
+oc get maasmodelref qwen25-7b-instruct -n models-as-a-service \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase'
+# Expected: Phase=Ready
 ```
 
-**TELL**: The model is deployed with a declarative CR. RHOAI handles the vLLM runtime, GPU scheduling, and endpoint registration. The `MaaSModelRef` status of `Ready` proves governance is attached — the model won't serve traffic through the MaaS gateway until subscriptions and auth policies are in place.
+**TELL**: The model runs on a dedicated GPU cluster. The AI Bridge doesn't need GPUs — it only needs the `ExternalModel` CR pointing to the model's endpoint and a credential Secret for authentication. The `MaaSModelRef` status of `Ready` proves governance is attached — consumers can now access the model through the MaaS gateway with full auth and rate limiting.
 
 > **Why an ELB (not an OpenShift Route)?**
 >
@@ -659,7 +669,7 @@ echo "Secret rotation completed with zero downtime."
 
 ## 11. EXTERNAL MODELS — AI Bridge as Centralized Gateway (Stage C+)
 
-**TELL**: So far we've shown governance over a model running locally on this cluster. But the AI Bridge can also govern models running *anywhere* — on other clusters, or from external providers like Google Gemini, Azure OpenAI, or AWS Bedrock. The `ExternalModel` CR (Technology Preview in 3.4, GA in 3.5) lets you register any OpenAI-compatible endpoint as a governed model. The consumer experience is identical: same MaaS gateway URL, same API keys, same rate limiting. They never know if the model is local, cross-cluster, or a third-party API.
+**TELL**: In this demo, the AI Bridge cluster (Cluster 1) runs no models — it is purely a governance layer. All models run elsewhere: vLLM on a separate GPU cluster (Cluster 2), and Gemini on Google's cloud. The `ExternalModel` CR (Technology Preview in 3.4, GA in 3.5) registers any OpenAI-compatible endpoint as a governed model. The AI Bridge handles authentication, rate limiting, and credential injection — then routes to the appropriate backend. The consumer experience is identical regardless of where the model runs: same MaaS gateway URL, same API keys, same rate limiting. They never know if the model is on a remote cluster or a third-party API.
 
 > **ExternalModel CR fields** (`maas.opendatahub.io/v1alpha1`):
 > | Field | Purpose |
@@ -715,7 +725,7 @@ curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat
 # The request traversed: Client → AI Bridge (Cluster 1) → credential injection → Cluster 2 vLLM
 
 # Verify the same rate limiting applies
-# (ExternalModels are bound to the same MaaSSubscriptions as local models)
+# (ExternalModels are bound to the same MaaSSubscriptions — same governance applies)
 oc get tokenratelimitpolicies -n models-as-a-service --no-headers
 ```
 
@@ -738,7 +748,7 @@ curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/gemini-2-0-flash/v1/chat/c
 # The request traversed: Client → AI Bridge → path rewrite → credential injection → Google API
 
 # The consumer used the SAME API key, SAME gateway, SAME format
-# They don't know (or care) that this model is Gemini vs local vLLM
+# They don't know (or care) that this model is Gemini vs self-hosted vLLM on Cluster 2
 ```
 
 ### 11.3 Architecture: What This Proves
@@ -770,7 +780,7 @@ Key points:
 • Adding a new backend = one ExternalModel CR + one Secret (zero consumer changes)
 ```
 
-**TELL**: This is the AI Bridge vision: centralized model governance across any backend. Local models, remote clusters, cloud providers — all unified under one gateway with consistent authentication, rate limiting, and usage tracking. Adding a new model backend is a single CR + secret. Consumers get one stable URL and one API key that works across everything.
+**TELL**: This is the AI Bridge vision: centralized model governance across any backend. Self-hosted models on GPU clusters, third-party cloud APIs — all unified under one gateway with consistent authentication, rate limiting, and usage tracking. Adding a new model backend is a single `ExternalModel` CR + one Secret. Consumers get one stable URL and one API key that works across everything.
 
 **Estimated time**: 8 minutes
 
