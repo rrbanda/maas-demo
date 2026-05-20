@@ -46,6 +46,7 @@ Before the demo, ensure the audience understands these terms:
 | **TokenRateLimitPolicy** | Auto-generated CRD (by MaaS controller) | You never create this — it's generated from `MaaSSubscription.spec.tokenRateLimits` |
 | **Perses Dashboard** | Built-in observability dashboard (Technology Preview) | Embedded in OpenShift AI console; shows token usage per subscription |
 | **Tech Preview** | Red Hat support term: feature is functional but not production-supported | May change APIs or behavior in future releases; use at own risk |
+| **Gateway API** | K8s-native API for service exposure (`gateway.networking.k8s.io`) | Successor to Ingress/Routes; required because Kuadrant policies attach to HTTPRoute, not OpenShift Routes |
 | **`sk-oai-`** | API key prefix for MaaS-generated keys | Intentionally similar to OpenAI's `sk-` format for developer familiarity |
 
 ### CRD Relationship Diagram
@@ -221,6 +222,16 @@ oc get maasmodelref qwen25-7b-instruct -n llm-inference \
 ```
 
 **TELL**: The model is deployed with a declarative CR. RHOAI handles the vLLM runtime, GPU scheduling, and endpoint registration. The `MaaSModelRef` status of `Ready` proves governance is attached — the model won't serve traffic through the MaaS gateway until subscriptions and auth policies are in place.
+
+> **Why an ELB (not an OpenShift Route)?**
+>
+> The MaaS gateway uses the **Kubernetes Gateway API** (`gateway.networking.k8s.io`), not OpenShift Routes. This is intentional:
+> - Kuadrant's `AuthPolicy` and `TokenRateLimitPolicy` attach to **HTTPRoute** resources (Gateway API). They cannot attach to OpenShift Routes.
+> - RHOAI creates a `GatewayClass` (`data-science-gateway-class`) and a `Gateway` (`maas-default-gateway`) which provisions an Envoy-based data plane with its own LoadBalancer Service.
+> - On AWS, that LoadBalancer gets an ELB. On-prem, it would be MetalLB or NodePort — but the Gateway API pattern is the same.
+> - The MaaS controller auto-generates `HTTPRoute` resources (not OpenShift Routes) to route traffic to models.
+>
+> **Traffic flow**: Client → ELB → Gateway (Envoy) → HTTPRoute → AuthPolicy (Authorino) → TokenRateLimitPolicy (Limitador) → vLLM Pod
 
 **Estimated time**: 3 minutes
 
