@@ -6,5 +6,6 @@ resources:
   - download-job.yaml
   - llm-inference-service.yaml
   - model-ref.yaml
+  - tenant.yaml
   - auth-policy.yaml
   - subscriptions.yaml

@@ -5,10 +5,13 @@ This document describes the API key lifecycle operations for MaaS subscriptions 
 ## Overview
 
 Each `MaaSSubscription` can have multiple API keys. Keys are:
+- **Prefixed** with `sk-oai-` (OpenAI-compatible format for developer familiarity)
 - **Scoped** to the models bound to that subscription
-- **Hashed** at rest in PostgreSQL (not retrievable after creation)
-- **Validated per-request** by the MaaS gateway (Authorino)
-- **Immediately effective** on creation or revocation (no cache delay)
+- **Hashed** at rest in PostgreSQL as SHA-256 (not retrievable after creation)
+- **Validated per-request** by Authorino (no caching — revocation is instant)
+- **Expirable** — 1 to 365 days, with admin-configurable max via `Tenant.spec.apiKeys.maxExpirationDays` (default 90)
+- **Group-snapshotted** — keys capture the user's group memberships at creation time; later group changes do not affect existing keys
+- **Statused** — Active, Expired, or Revoked (revocation is permanent and cannot be undone)
 
 ## Key Operations
 
@@ -34,8 +37,8 @@ MAAS_API="https://$(oc get route maas-api -n redhat-ods-applications -o jsonpath
 curl -sk -X POST "${MAAS_API}/api/v1/subscriptions/team-a-ml-engineering/keys" \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"name": "team-a-primary-key"}'
-# Response: {"key": "sk-...", "name": "team-a-primary-key", "created_at": "..."}
+  -d '{"name": "team-a-primary-key", "expirationDays": 30}'
+# Response: {"key": "sk-oai-...", "name": "team-a-primary-key", "created_at": "...", "expires_at": "..."}
 ```
 
 ### 2. Verify Key Works
@@ -102,12 +105,16 @@ oc exec -n maas-db statefulset/postgresql -- \
 
 | Property | Value |
 |----------|-------|
-| Format | `sk-` prefix + random alphanumeric |
-| Storage | SHA-256 hash in PostgreSQL |
-| Scope | Bound to subscription's modelRefs |
-| Validation | Per-request (no caching) |
-| Revocation latency | Immediate (next request) |
-| Max keys per subscription | Configurable (default: unlimited) |
+| Format | `sk-oai-` prefix + random alphanumeric |
+| Expiration | 1–365 days (max controlled by `Tenant.spec.apiKeys.maxExpirationDays`, default 90) |
+| Storage | SHA-256 hash in PostgreSQL (`redhat-ods-applications` namespace) |
+| Scope | Bound to subscription's `modelRefs` |
+| Group snapshot | Captures user's group memberships at key creation time |
+| Validation | Per-request by Authorino (no caching) |
+| Revocation | Permanent, instant (next request returns 401) |
+| Statuses | Active, Expired, Revoked |
+| Temporary keys | 1-hour TTL, generated from Endpoints dialog in dashboard |
+| Admin capabilities | Create on behalf of users, revoke individual or all keys for a user |
 
 ## Demo Script (Quick Lifecycle Demo)
 

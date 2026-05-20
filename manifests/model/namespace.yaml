@@ -5,3 +5,11 @@ metadata:
   labels:
     kubernetes.io/metadata.name: llm-inference
     opendatahub.io/dashboard: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: models-as-a-service
+  labels:
+    kubernetes.io/metadata.name: models-as-a-service
+    opendatahub.io/dashboard: "true"

@@ -2,6 +2,9 @@
 
 Pre-built queries for monitoring AI Bridge subscription usage in OpenShift Console → Observe → Metrics.
 
+> **Metric sources**: Authorino (auth decisions), Limitador (rate limiting/token metering), vLLM (inference performance).
+> These metrics are exposed when the MaaS controller auto-generates `TokenRateLimitPolicy` and `AuthPolicy` resources from your `MaaSSubscription` and `MaaSAuthPolicy` CRs.
+
 ---
 
 ## Auth & Access Control
@@ -25,6 +28,16 @@ increase(auth_server_authconfig_total[1h])
 
 ## Rate Limiting & Token Metering
 
+### Authorized calls (requests that passed rate limiting)
+```promql
+authorized_calls{namespace="models-as-a-service"}
+```
+
+### Limited calls (requests rejected with HTTP 429)
+```promql
+limited_calls{namespace="models-as-a-service"}
+```
+
 ### Current rate limit counter value per subscription
 ```promql
 limitador_counter_value{namespace="models-as-a-service"}
@@ -35,7 +48,7 @@ limitador_counter_value{namespace="models-as-a-service"}
 limitador_counter_value / limitador_counter_max_value
 ```
 
-### Requests being rate limited (429s issued)
+### Requests being rate limited (429s issued) — alternative
 ```promql
 rate(limitador_requests_total{limited="true"}[5m])
 ```

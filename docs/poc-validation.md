@@ -26,17 +26,19 @@ This document maps each PoC success criterion to validated evidence from the dem
 ### SC #1 — Per-Use-Case Authentication
 
 ```bash
-$ oc get maassubscription -n llm-inference
+$ oc get maassubscription -n models-as-a-service
 NAME                      TIER       PRIORITY
-team-a-ml-engineering     premium    1
+team-a-ml-engineering     premium    10
 team-b-data-science       standard   5
-team-c-app-developers     basic      10
+team-c-app-developers     basic      1
 ```
 
-- API keys created via MaaS CLI/API, hashed and stored in PostgreSQL
-- Validated per-request by Authorino (gRPC ext-auth)
+- API keys (prefix `sk-oai-`) created via RHOAI Dashboard or MaaS API, SHA-256 hashed in PostgreSQL
+- Validated per-request by Authorino (gRPC ext-auth) — no caching
 - Invalid key returns HTTP 401/403
-- Key revocation takes effect on next request
+- Key revocation is permanent and instant (next request)
+- Key expiration: 1–365 days, max controlled by `Tenant.spec.apiKeys.maxExpirationDays`
+- Group snapshot: keys capture user's group memberships at creation time
 
 ### SC #2 — Token-Based Rate Limiting
 

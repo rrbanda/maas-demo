@@ -1,0 +1,13 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: Tenant
+metadata:
+  name: default-tenant
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+spec:
+  gatewayRef:
+    namespace: openshift-ingress
+    name: maas-default-gateway
+  apiKeys:
+    maxExpirationDays: 90
