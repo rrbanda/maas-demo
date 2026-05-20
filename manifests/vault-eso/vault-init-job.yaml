@@ -25,16 +25,39 @@ spec:
                 sleep 2
               done
               vault kv put secret/ai-bridge/api-keys \
-                team-a-key="REPLACE_WITH_TEAM_A_KEY" \
-                team-b-key="REPLACE_WITH_TEAM_B_KEY"
+                team-a-key="$TEAM_A_KEY" \
+                team-b-key="$TEAM_B_KEY"
               vault kv put secret/ai-bridge/db-credentials \
-                postgres-password="REPLACE_WITH_POSTGRES_PASSWORD" \
-                postgres-url="REPLACE_WITH_DATABASE_URL"
+                postgres-password="$POSTGRES_PASSWORD" \
+                postgres-url="$DATABASE_URL"
           env:
             - name: VAULT_ADDR
               value: "http://vault.vault-dev.svc:8200"
             - name: VAULT_TOKEN
-              value: "REPLACE_WITH_VAULT_TOKEN"
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: vault-token
+            - name: TEAM_A_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: team-a-key
+            - name: TEAM_B_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: team-b-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: postgres-password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: database-url
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true

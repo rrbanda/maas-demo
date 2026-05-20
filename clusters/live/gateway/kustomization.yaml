@@ -43,21 +43,3 @@ patches:
       - op: replace
         path: /spec/rules/authentication/keycloak-jwt/jwt/issuerUrl
         value: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
-  # Vault Init Job — seed demo secrets
-  - target:
-      kind: Job
-      name: vault-init
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/args/0
-        value: |
-          until vault status > /dev/null 2>&1; do
-            echo "Waiting for Vault..."
-            sleep 2
-          done
-          vault kv put secret/ai-bridge/api-keys \
-            team-a-key="REPLACE_WITH_TEAM_A_KEY" \
-            team-b-key="REPLACE_WITH_TEAM_B_KEY"
-          vault kv put secret/ai-bridge/db-credentials \
-            postgres-password="REPLACE_WITH_DB_PASSWORD" \
-            postgres-url="postgresql://maas:REPLACE_WITH_DB_PASSWORD@postgresql.maas-db.svc:5432/maas?sslmode=disable"

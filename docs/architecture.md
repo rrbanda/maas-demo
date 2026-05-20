@@ -275,7 +275,7 @@ An inline content safety filter that inspects requests and responses for PII usi
 | Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No filtering |
 | Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 | OIDC Provider | `https://<KEYCLOAK_HOST>/realms/<realm>` | admin creds | External — not deployed here |
-| Vault API | `http://vault.vault-dev.svc:8200` (cluster-internal) | Token: `REPLACE_WITH_VAULT_TOKEN` | Dev mode only |
+| Vault API | `http://vault.vault-dev.svc:8200` (cluster-internal) | Token from `vault-token` Secret | Dev mode only |
 
 ---
 

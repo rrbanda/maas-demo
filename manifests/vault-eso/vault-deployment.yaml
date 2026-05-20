@@ -25,12 +25,18 @@ spec:
           args:
             - |
               export SKIP_SETCAP=1
-              vault server -dev -dev-root-token-id=REPLACE_WITH_VAULT_TOKEN -dev-listen-address=0.0.0.0:8200 -dev-no-store-token 2>&1 || sleep 3600
+              vault server -dev \
+                -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID" \
+                -dev-listen-address=0.0.0.0:8200 \
+                -dev-no-store-token 2>&1 || sleep 3600
           ports:
             - containerPort: 8200
           env:
             - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: "REPLACE_WITH_VAULT_TOKEN"
+              valueFrom:
+                secretKeyRef:
+                  name: vault-token
+                  key: token
             - name: VAULT_ADDR
               value: "http://0.0.0.0:8200"
             - name: SKIP_SETCAP

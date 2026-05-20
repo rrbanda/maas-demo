@@ -61,17 +61,6 @@ patches:
               server = http.server.HTTPServer(("0.0.0.0", 8085), OrchestratorHandler)
               print("Orchestrator proxy listening on :8085")
               server.serve_forever()
-  # PostgreSQL Secret — password and DATABASE_URL
-  - target:
-      kind: Secret
-      name: maas-db-config
-    patch: |-
-      - op: replace
-        path: /stringData/POSTGRES_PASSWORD
-        value: REPLACE_WITH_DB_PASSWORD
-      - op: replace
-        path: /stringData/DATABASE_URL
-        value: "postgresql://maas:REPLACE_WITH_DB_PASSWORD@postgresql.maas-db.svc:5432/maas?sslmode=disable"
   # OIDC AuthConfig — MaaS gateway host + Keycloak issuer
   - target:
       kind: AuthConfig

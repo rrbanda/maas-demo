@@ -5,4 +5,5 @@ resources:
   - vault-init-job.yaml
   - eso-subscription.yaml
   - secretstore.yaml
+  - cluster-secret-store.yaml
   - external-secrets.yaml

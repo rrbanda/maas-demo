@@ -63,7 +63,7 @@ apply_substituted() {
     -e "s|REPLACE_WITH_VLLM_SERVICE|${VLLM_SERVICE}|g" \
     -e "s|REPLACE_WITH_MAAS_GATEWAY_HOST|${MAAS_GW_HOST:-$MAAS_GW_SVC}|g" \
     -e "s|REPLACE_WITH_KEYCLOAK_ISSUER_URL|https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}|g" \
-    -e "s|REPLACE_WITH_DB_PASSWORD|${DB_PASSWORD:-REPLACE_WITH_DB_PASSWORD}|g" \
+    -e "s|REPLACE_WITH_DB_PASSWORD|${DB_PASSWORD}|g" \
     -e "s|REPLACE_WITH_GUARDRAILS_ROUTE|${GUARDRAILS_HOST}|g" \
     "$work_file"
   rm -f "${work_file}.bak"
@@ -82,7 +82,7 @@ apply_dir_substituted() {
       -e "s|REPLACE_WITH_VLLM_SERVICE|${VLLM_SERVICE}|g" \
       -e "s|REPLACE_WITH_MAAS_GATEWAY_HOST|${MAAS_GW_HOST:-$MAAS_GW_SVC}|g" \
       -e "s|REPLACE_WITH_KEYCLOAK_ISSUER_URL|https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}|g" \
-      -e "s|REPLACE_WITH_DB_PASSWORD|${DB_PASSWORD:-REPLACE_WITH_DB_PASSWORD}|g" \
+      -e "s|REPLACE_WITH_DB_PASSWORD|${DB_PASSWORD}|g" \
       -e "s|REPLACE_WITH_GUARDRAILS_ROUTE|${GUARDRAILS_HOST}|g" \
       "$f"
     rm -f "${f}.bak"
@@ -149,8 +149,8 @@ VAULT_POD=$(oc get pods -n vault-dev -l app=vault -o jsonpath='{.items[0].metada
 if [ -n "$VAULT_POD" ]; then
   oc exec "$VAULT_POD" -n vault-dev -- sh -c "
     export VAULT_TOKEN=${VAULT_TOKEN}
-    vault kv put secret/ai-bridge/api-keys team-a-key=REPLACE_WITH_TEAM_A_KEY team-b-key=REPLACE_WITH_TEAM_B_KEY
-    vault kv put secret/ai-bridge/db-credentials postgres-password=${DB_PASSWORD:-REPLACE_WITH_DB_PASSWORD} postgres-url=postgresql://maas:${DB_PASSWORD:-REPLACE_WITH_DB_PASSWORD}@postgresql.maas-db.svc:5432/maas
+    vault kv put secret/ai-bridge/api-keys team-a-key=\${TEAM_A_KEY:-changeme} team-b-key=\${TEAM_B_KEY:-changeme}
+    vault kv put secret/ai-bridge/db-credentials postgres-password=\${DB_PASSWORD} postgres-url=postgresql://maas:\${DB_PASSWORD}@postgresql.maas-db.svc:5432/maas
   "
   echo "  Vault seeded."
 fi
