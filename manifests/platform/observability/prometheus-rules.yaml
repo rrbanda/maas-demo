@@ -1,0 +1,49 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ai-bridge-rate-limit-alerts
+  namespace: kuadrant-system
+  labels:
+    app.kubernetes.io/part-of: ai-bridge-observability
+spec:
+  groups:
+    - name: ai-bridge.rate-limits
+      rules:
+        - alert: SubscriptionRateLimitApproaching
+          expr: |
+            (limitador_counter_value / limitador_counter_max_value) > 0.8
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Subscription approaching token rate limit (>80%)"
+            description: "Subscription {{ $labels.limitador_namespace }} has consumed {{ $value | humanizePercentage }} of its token quota."
+        - alert: SubscriptionRateLimited
+          expr: |
+            rate(limitador_requests_total{limited="true"}[5m]) > 0
+          for: 0m
+          labels:
+            severity: info
+          annotations:
+            summary: "Subscription is being rate limited"
+            description: "Requests from {{ $labels.limitador_namespace }} are being throttled (HTTP 429)."
+        - alert: HighAuthDenialRate
+          expr: |
+            rate(auth_server_authconfig_total{authconfig_result!="OK"}[5m])
+            / rate(auth_server_authconfig_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High authentication denial rate (>10%)"
+            description: "More than 10% of auth requests are being denied. Possible credential misconfiguration or attack."
+        - alert: ModelInferenceErrorRate
+          expr: |
+            rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class="5"}[5m])
+            / rate(envoy_cluster_upstream_rq_xx[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Model inference error rate >5%"
+            description: "Backend model errors are elevated. Check vLLM pod health and GPU utilization."

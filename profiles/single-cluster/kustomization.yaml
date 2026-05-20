@@ -9,6 +9,7 @@ resources:
   - ../../manifests/platform/maas-postgres
   - ../../manifests/platform/observability
   - ../../manifests/platform/authorino-tls
+  - ../../manifests/platform/kuadrant
   # Model
   - ../../manifests/model
   # llm-d
