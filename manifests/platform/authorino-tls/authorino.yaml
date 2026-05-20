@@ -11,3 +11,6 @@ spec:
       enabled: true
       certSecretRef:
         name: authorino-tls
+  oidcServer:
+    tls:
+      enabled: false
