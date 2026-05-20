@@ -5,6 +5,8 @@ kind: Kustomization
 resources:
   # AI Gateway (multi-cluster routing)
   - ../../../manifests/ai-gateway
+  # Kuadrant (AuthPolicy + RateLimitPolicy enforcement)
+  - ../../../manifests/platform/kuadrant
   # Authorino TLS (for OIDC auth enforcement)
   - ../../../manifests/platform/authorino-tls
   # Vault + ESO
