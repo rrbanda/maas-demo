@@ -13,7 +13,7 @@ Demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red H
 | OIDC/SSO federation | Any OIDC IdP JWT validation alongside API keys (BYO Keycloak/Okta/Azure AD) |
 | Secret rotation pattern | Vault + External Secrets Operator demonstrating zero-downtime K8s Secret sync |
 | Content safety guardrails | PII detection (email, SSN, credit card regex) before model access |
-| Multi-cluster routing | Istio gateway with OIDC auth → TLS to model on remote GPU cluster |
+| Multi-cluster routing | ExternalModel CRs on AI Bridge route to models on remote clusters + cloud APIs |
 
 ---
 
@@ -21,88 +21,92 @@ Demonstration of **Models-as-a-Service** (MaaS) governance capabilities on Red H
 
 ```mermaid
 flowchart TB
-    subgraph GW["Gateway Cluster — optional"]
+    subgraph C1["Cluster 1 — AI Bridge (No GPUs)"]
         direction TB
-        AIGw["AI Gateway<br/>(Istio + Gateway API)"]
-        Vault["HashiCorp Vault<br/>+ ESO"]
+        MaaS["MaaS Gateway<br/>(Envoy + ELB)<br/>created by RHOAI operator"]
+        Auth["Authorino<br/>(API key + OIDC validation)"]
+        Lim["Limitador<br/>(token-based rate limiting)"]
+        EM1["ExternalModel: qwen25-7b-instruct<br/>→ Cluster 2 vLLM"]
+        EM2["ExternalModel: gemini-2-0-flash<br/>→ Google Gemini API"]
+        PG["PostgreSQL<br/>(API key hashes)"]
+        Vault["HashiCorp Vault + ESO<br/>(provider credentials)"]
+        KC["Keycloak<br/>(OIDC provider)"]
     end
 
-    subgraph INF["Inference Cluster"]
+    subgraph C2["Cluster 2 — Inference Worker (GPU)"]
         direction TB
-        MaaS["MaaS Gateway<br/>(Envoy + Authorino + Limitador)<br/>created by RHOAI operator"]
-        Guard["Guardrails Gateway<br/>(PII Detection)"]
-        EPP["llm-d EPP<br/>(Endpoint Picker)"]
         vLLM["vLLM<br/>(Qwen2.5-7B-Instruct)"]
-        PG["PostgreSQL<br/>(MaaS state)"]
-        Prom["Prometheus<br/>(User Workload Monitoring)"]
-        OIDC["OIDC AuthConfig<br/>(validates JWT from external IdP)"]
+        EPP["llm-d EPP<br/>(Endpoint Picker)"]
     end
 
-    Client(["API Consumer"]) --> MaaS
-    Client -->|"multi-cluster path"| AIGw
-    AIGw -->|"OIDC auth (Authorino)"| AIGw
-    AIGw -->|"TLS origination<br/>to model route"| vLLM
-    MaaS -->|"auth + rate limit"| vLLM
-    Guard -->|"PII filter proxy"| vLLM
+    subgraph EXT["External Providers"]
+        Gemini["Google Gemini API"]
+    end
+
+    Client(["API Consumer<br/>same API key, same URL format"]) --> MaaS
+    MaaS --> Auth
+    Auth --> Lim
+    Lim -->|"inject bearer token"| EM1
+    Lim -->|"inject API key"| EM2
+    EM1 -->|"OpenShift Route + TLS"| vLLM
+    EM2 -->|"HTTPS"| Gemini
     EPP -.->|"routes to optimal replica"| vLLM
-    OIDC -.->|"validates tokens"| MaaS
-    MaaS -.-> Prom
-    Vault -.->|"syncs secrets to K8s"| Vault
+    Vault -.->|"syncs provider creds"| MaaS
 ```
 
-### Multi-Cluster Traffic Flow
+### Multi-Cluster Traffic Flow (ExternalModel)
 
-The AI Gateway enforces OIDC/JWT authentication (via Authorino + Keycloak on the gateway cluster) before forwarding requests to the model on the inference cluster. Unauthenticated requests receive 401.
+All consumer traffic enters through the MaaS gateway on Cluster 1 (AI Bridge). The gateway validates API keys, enforces rate limits, then injects provider credentials and routes to the appropriate backend. Consumers never see or handle provider credentials.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as AI Gateway<br/>(Gateway Cluster)
-    participant Auth as Authorino<br/>(JWT validation)
-    participant KC as Keycloak<br/>(JWKS)
-    participant RT as OpenShift Route<br/>(Inference Cluster)
-    participant V as vLLM
+    participant GW as MaaS Gateway<br/>(Cluster 1 — AI Bridge)
+    participant Auth as Authorino<br/>(API key validation)
+    participant Lim as Limitador<br/>(token counting)
+    participant PP as Payload Processing<br/>(credential injection)
+    participant V as vLLM<br/>(Cluster 2 — GPU)
 
-    C->>GW: POST /v1/chat/completions<br/>+ Authorization: Bearer <JWT>
-    GW->>Auth: ext_authz (gRPC/TLS)
-    Auth->>KC: Validate JWT signature (JWKS)
-    KC-->>Auth: Valid
-    Auth-->>GW: Allow
-    GW->>GW: Host header rewrite
-    GW->>RT: TLS origination (port 443)
-    RT->>V: Route to vLLM pod
-    V->>GW: Response
-    GW->>C: Response
+    C->>GW: POST /models-as-a-service/qwen25-7b-instruct/v1/chat/completions<br/>+ Authorization: Bearer sk-oai-...
+    GW->>Auth: Validate API key (PostgreSQL lookup)
+    Auth-->>GW: Authorized (subscription: team-a-premium)
+    GW->>Lim: Check token budget (500K tokens/hr)
+    Lim-->>GW: Within limits
+    GW->>PP: Resolve ExternalModel → endpoint + credentials
+    PP->>PP: Inject bearer token from Vault-synced Secret
+    PP->>V: Forward to Cluster 2 vLLM (with injected token)
+    V-->>PP: Response (usage.total_tokens: 47)
+    PP-->>GW: Response
+    GW->>Lim: Record 47 tokens consumed
+    GW-->>C: Standard OpenAI response
 ```
 
-### Governance Stack (MaaS Direct Access)
-
-When clients access the MaaS gateway directly, requests pass through Authorino (auth) and Limitador (rate limiting):
+### Governance Stack
 
 ```mermaid
 flowchart LR
-    subgraph AuthZ["Authentication"]
-        AK["API Keys<br/>(MaaSSubscription)"]
-        OIDC["OIDC JWT<br/>(external IdP)"]
+    subgraph AuthZ["Authentication (Cluster 1)"]
+        AK["API Keys<br/>(per-subscription, sk-oai-*)"]
+        OIDC["OIDC JWT<br/>(Keycloak / enterprise IdP)"]
     end
 
-    subgraph RL["Rate Limiting"]
-        TRL["Token Rate Limits<br/>(tokens/hour per subscription)"]
-        LIM["Limitador<br/>(enforcement)"]
+    subgraph RL["Rate Limiting (Cluster 1)"]
+        TRL["Token Rate Limits<br/>(per-subscription, tokens/hr)"]
+        LIM["Limitador<br/>(enforcement + 429)"]
     end
 
-    subgraph OBS["Observability"]
-        SM["ServiceMonitors"]
-        PROM["Prometheus"]
-        DASH["Dashboard ConfigMap"]
+    subgraph Backends["Model Backends"]
+        Local["Local models<br/>(same cluster)"]
+        Remote["Remote clusters<br/>(ExternalModel)"]
+        Cloud["Cloud APIs<br/>(Gemini, Azure, etc.)"]
     end
 
     AK --> LIM
     OIDC --> LIM
     TRL --> LIM
-    LIM --> SM
-    SM --> PROM
-    PROM --> DASH
+    LIM --> Local
+    LIM --> Remote
+    LIM --> Cloud
 ```
 
 ---
@@ -111,16 +115,16 @@ flowchart LR
 
 These must be installed on your cluster(s) **before** running `deploy-all.sh`:
 
-| Prerequisite | Required for | Installed by this repo? |
-|--------------|-------------|------------------------|
-| OpenShift 4.19+ | Platform | No |
-| RHOAI 3.4 operator | MaaS gateway, model serving | No (DSC manifest only) |
-| RHCL/Kuadrant operator | Authorino + Limitador | No |
-| NVIDIA GPU Operator | Model inference (both clusters have GPUs) | No |
-| Istio/Service Mesh | Multi-cluster routing | No |
-| OIDC provider (Keycloak, Okta, etc.) | OIDC demo | No — bring your own |
+| Prerequisite | Cluster 1 (AI Bridge) | Cluster 2 (Inference Worker) |
+|--------------|:---:|:---:|
+| OpenShift 4.18+ | Yes | Yes |
+| RHOAI 3.4 operator | Yes (MaaS governance) | Yes (model serving) |
+| RHCL/Kuadrant operator | Yes (Authorino + Limitador) | No |
+| NVIDIA GPU Operator | No (no GPUs needed) | Yes |
+| Service Mesh 3 | Yes (Gateway API provider) | No |
+| OIDC provider (Keycloak, etc.) | Yes | No |
 
-The scripts deploy the **application-level** resources (model, subscriptions, guardrails, Vault, ESO, observability) but assume the platform operators are already present.
+The scripts deploy the **application-level** resources (model, subscriptions, ExternalModels, Vault, ESO, observability) but assume the platform operators are already present.
 
 ---
 
@@ -128,12 +132,15 @@ The scripts deploy the **application-level** resources (model, subscriptions, gu
 
 ### 0. Platform Setup (one-time)
 
-Ensure the following operators are installed on your inference cluster:
-- Red Hat OpenShift AI 3.4
+**Cluster 1 (AI Bridge):**
+- Red Hat OpenShift AI 3.4 (with `modelsAsService: Managed`)
 - Red Hat Connectivity Link (Kuadrant)
-- NVIDIA GPU Operator
+- Service Mesh 3 (for Gateway API)
+- OIDC provider (Keycloak deployed or external)
 
-For multi-cluster, also install Istio/Service Mesh on the gateway cluster.
+**Cluster 2 (Inference Worker):**
+- Red Hat OpenShift AI 3.4 (for KServe/vLLM)
+- NVIDIA GPU Operator
 
 ### 1. Configure
 
@@ -144,10 +151,11 @@ vim scripts/config.env
 ```
 
 Key values to fill:
-- `CTX_INFERENCE` / `CTX_GATEWAY` — your `oc` context names
-- `REMOTE_MODEL_HOSTNAME` — the model's OpenShift Route hostname (for multi-cluster)
-- `VLLM_SERVICE` — the KServe workload service (e.g., `qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000`)
-- `KEYCLOAK_HOST` — your OIDC provider hostname (if using OIDC)
+- `CTX_AI_BRIDGE` / `CTX_INFERENCE` — your `oc` context names for Cluster 1 / Cluster 2
+- `MAAS_GW_HOST` — the MaaS gateway ELB hostname (auto-provisioned on Cluster 1)
+- `INFERENCE_CLUSTER_ROUTE` — the model's OpenShift Route hostname on Cluster 2 (used by ExternalModel)
+- `KEYCLOAK_HOST` — your OIDC provider hostname (Keycloak on Cluster 1)
+- `GEMINI_API_KEY` — Google Gemini API key (stored in Vault, never in Git)
 
 ### 2. Deploy
 
@@ -206,8 +214,8 @@ Deploys the full stack on one OpenShift cluster. Multi-cluster routing resources
 # or: ./scripts/deploy-all.sh --profile single-cluster
 ```
 
-### Multi-Cluster
-Deploys the gateway components on one cluster and inference on another.
+### Multi-Cluster (AI Bridge + Inference Worker)
+Deploys MaaS governance + ExternalModels on Cluster 1 (AI Bridge) and model serving on Cluster 2 (Inference Worker).
 
 ```bash
 ./scripts/deploy-all.sh multi-cluster
@@ -224,8 +232,8 @@ Deploys the gateway components on one cluster and inference on another.
 
 | Endpoint | URL Pattern | Auth | Notes |
 |----------|-------------|------|-------|
-| MaaS Gateway | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key or OIDC | Created by RHOAI operator |
-| Multi-cluster Gateway | `http://<AI_GW_HOST>:80/v1/chat/completions` | OIDC JWT | Keycloak token required; Authorino validates locally |
+| MaaS Gateway (ExternalModel) | `https://<MAAS_GW_HOST>/models-as-a-service/<model>/v1/chat/completions` | API key (`sk-oai-*`) | Primary path — governed access to remote/external models |
+| MaaS Gateway (local model) | `https://<MAAS_GW_HOST>/llm-inference/<model>/v1/chat/completions` | API key (`sk-oai-*`) | Only if model runs on same cluster as MaaS |
 | Guardrails (passthrough) | `http://<GUARDRAILS_HOST>/passthrough/v1/chat/completions` | None | No PII filtering |
 | Guardrails (PII filter) | `http://<GUARDRAILS_HOST>/pii/v1/chat/completions` | None | Regex PII detection |
 

@@ -106,28 +106,38 @@ Key rule: MaaSModelRef becomes "Ready" ONLY when:
 # Source environment config
 source scripts/config.env
 
-# Verify cluster access (inference cluster)
-oc whoami --show-server
+# === Cluster 1 (AI Bridge) — all governance checks ===
+oc login ${CTX_AI_BRIDGE}
 
 # Verify all 5 MaaS CRDs are registered
 oc api-resources | grep maas.opendatahub.io
 # Expected: externalmodels, maasauthpolicies, maasmodelrefs, maassubscriptions, tenants
 
-# Confirm Tenant is Active
-oc get tenant default-tenant -n models-as-a-service -o jsonpath='{.status.phase}'
-# Expected: Active
-
-# Confirm model is serving
-oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
-# Expected: 1/1 Running
+# Confirm Tenant is Active/Ready
+oc get tenant default-tenant -n models-as-a-service \
+  -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status'
+# Expected: Ready=True
 
 # Confirm MaaS subscriptions are Active
 oc get maassubscriptions -n models-as-a-service
-# Expected: 3 subscriptions, all "Active"
+# Expected: 3+ subscriptions, all "Active"
 
-# Confirm MaaSModelRef is Ready
-oc get maasmodelref qwen25-7b-instruct -n llm-inference -o jsonpath='{.status.phase}'
-# Expected: Ready
+# Confirm ExternalModels and MaaSModelRefs are Ready
+oc get externalmodel -n models-as-a-service
+oc get maasmodelref -n models-as-a-service
+# Expected: gemini-2-0-flash (Ready), qwen25-7b-instruct (Ready)
+
+# Confirm MaaS gateway is Programmed
+oc get gateway maas-default-gateway -n openshift-ingress \
+  -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}'
+# Expected: True
+
+# === Cluster 2 (Inference Worker) — model serving check ===
+oc login ${CTX_INFERENCE}
+
+# Confirm model pod is running with GPU
+oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
+# Expected: 1/1 Running
 ```
 
 ---
@@ -249,21 +259,21 @@ oc get maasmodelref qwen25-7b-instruct -n llm-inference \
 **SHOW**:
 ```bash
 # The MaaS gateway exposes a standard OpenAI-compatible endpoint
-echo "MaaS endpoint: https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
+echo "MaaS endpoint: https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1"
 
 # Without auth → 401
 curl -sk --max-time 10 -w "HTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models"
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/models"
 # Expected: HTTP 401
 
 # With invalid key → 403
 curl -sk --max-time 10 -w "HTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/models" \
   -H "Authorization: Bearer sk-oai-invalid-key"
 # Expected: HTTP 403
 
 # With valid API key → standard OpenAI response
-curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -278,7 +288,7 @@ curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/compl
 # Python SDK example (identical to OpenAI usage)
 from openai import OpenAI
 client = OpenAI(
-    base_url="https://<MAAS_GW_HOST>/llm-inference/qwen25-7b-instruct/v1",
+    base_url="https://<MAAS_GW_HOST>/models-as-a-service/qwen25-7b-instruct/v1",
     api_key="sk-oai-..."  # MaaS-generated key
 )
 response = client.chat.completions.create(
@@ -306,20 +316,20 @@ When you create a `MaaSSubscription` + `MaaSAuthPolicy` + `MaaSModelRef`, the Ma
 
 **SHOW**:
 ```bash
-# The MaaS gateway is a single stable URL
-echo "MaaS Gateway: https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
+# The MaaS gateway is a single stable URL for ALL models (local, remote, or external)
+echo "MaaS Gateway: https://${MAAS_GW_HOST}/models-as-a-service/<model>/v1"
 
 # Auto-generated HTTPRoute (created by MaaS controller from MaaSModelRef)
-oc get httproutes -n llm-inference
-# Expected: qwen25-7b-instruct-kserve-route
+oc get httproutes -n models-as-a-service
+# Expected: qwen25-7b-instruct, gemini-2-0-flash
 
 # Auto-generated TokenRateLimitPolicy (created from MaaSSubscription.tokenRateLimits)
-oc get tokenratelimitpolicies -n llm-inference
-# Expected: maas-trlp-qwen25-7b-instruct
+oc get tokenratelimitpolicies -n models-as-a-service
+# Expected: maas-trlp-qwen25-7b-instruct, maas-trlp-gemini-2-0-flash
 
 # Auto-generated AuthPolicy (created from MaaSAuthPolicy)
-oc get authpolicies -n llm-inference
-# Expected: maas-auth-qwen25-7b-instruct
+oc get authpolicies -n openshift-ingress
+# Expected: gateway-default-auth, maas-default-gateway-authn
 ```
 
 ```
@@ -404,7 +414,7 @@ echo "MaaS API: https://$(oc get route maas-api-route -n redhat-ods-applications
 
 # Test with a valid API key
 curl -sk -w "\nHTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
@@ -412,7 +422,7 @@ curl -sk -w "\nHTTP %{http_code}\n" \
 
 # Test with invalid key — rejected immediately
 curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer sk-oai-invalid-key-12345" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
@@ -433,7 +443,7 @@ curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
 ```bash
 # Step 1: Confirm the key works
 curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Test"}],"max_tokens":5}'
@@ -445,7 +455,7 @@ curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
 
 # Step 3: Immediately retry the same key
 curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Test"}],"max_tokens":5}'
@@ -472,12 +482,12 @@ curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
 
 **SHOW**:
 ```bash
-# The auto-generated TokenRateLimitPolicy (in the MODEL's namespace, not models-as-a-service)
-oc get tokenratelimitpolicies -n llm-inference
+# The auto-generated TokenRateLimitPolicy (in models-as-a-service namespace on AI Bridge)
+oc get tokenratelimitpolicies -n models-as-a-service
 # Expected: maas-trlp-qwen25-7b-instruct
 
 # View the policy details — shows per-subscription limits
-oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n llm-inference \
+oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service \
   -o jsonpath='{.spec.limits}' | python3 -c "
 import json,sys
 limits = json.load(sys.stdin)
@@ -493,7 +503,7 @@ for name, config in limits.items():
 # Burst test: rapid requests to consume the basic tier's quota
 for i in $(seq 1 20); do
   RESP=$(curl -sk -w "%{http_code}" -o /tmp/resp.json \
-    "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+    "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
     -H "Authorization: Bearer ${TEAM_C_KEY}" \
     -H "Content-Type: application/json" \
     -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Write a detailed essay about artificial intelligence history covering all major milestones."}],"max_tokens":2000}')
@@ -504,7 +514,7 @@ done
 
 # Verify premium tier is unaffected
 curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${TEAM_A_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
@@ -801,9 +811,11 @@ curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
 
 ---
 
-### 12.2 Multi-Cluster Routing — Legacy Istio Approach (Superseded by Section 11)
+### 12.2 Multi-Cluster Routing — Legacy Istio Approach (SUPERSEDED by Section 11)
 
-**TELL**: This demonstrates the _mechanism_ of cross-cluster routing — not a production topology. A dedicated gateway cluster (no GPUs) validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards authenticated requests to the inference cluster over TLS using a static Istio ServiceEntry.
+> **This section is superseded.** The ExternalModel approach in Section 11 is the recommended multi-cluster pattern — it routes through MaaS governance (auth + rate limiting). This legacy Istio approach bypasses MaaS entirely and is preserved only for historical reference.
+
+**TELL**: This was an earlier proof-of-mechanism using a custom Istio gateway. A dedicated gateway cluster validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards to the inference cluster. Unlike Section 11, this does NOT pass through MaaS governance — no subscription-based rate limiting or API key auth.
 
 > **Technical reality (be honest with the customer)**:
 > - Routing is a hardcoded `ServiceEntry` (manual hostname of inference cluster)
@@ -872,31 +884,38 @@ All of this is:
 If something fails during the live demo:
 
 ```bash
-# If model isn't responding externally, test directly (vLLM uses TLS internally)
+# === On Cluster 2 (Inference Worker) ===
+# If model isn't responding externally, test vLLM directly
 oc port-forward -n llm-inference svc/qwen25-7b-instruct-kserve-workload-svc 8443:8000 &
 sleep 2
 curl -sk https://localhost:8443/v1/models
 kill %1
 
-# If MaaS gateway isn't accessible, test via internal service
+# === On Cluster 1 (AI Bridge) ===
+# If MaaS gateway isn't accessible externally, test via internal service
 oc port-forward -n openshift-ingress svc/maas-default-gateway-data-science-gateway-class 9443:443 &
 sleep 2
-curl -sk https://localhost:9443/llm-inference/qwen25-7b-instruct/v1/models \
+curl -sk https://localhost:9443/models-as-a-service/qwen25-7b-instruct/v1/models \
   -H "Authorization: Bearer ${API_KEY}"
 kill %1
 
 # If rate limiting hasn't triggered, show the auto-generated policy
-oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n llm-inference -o yaml
+oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service -o yaml
 
 # If subscriptions aren't Active, check Tenant status first
 oc get tenant default-tenant -n models-as-a-service -o yaml
 
 # If MaaSModelRef isn't Ready, check conditions
-oc get maasmodelref qwen25-7b-instruct -n llm-inference \
+oc get maasmodelref qwen25-7b-instruct -n models-as-a-service \
   -o jsonpath='{.status.conditions}' | python3 -m json.tool
 
+# If ExternalModel credentials aren't injecting, check the label
+oc get secret gemini-credentials -n models-as-a-service \
+  -o jsonpath='{.metadata.labels.inference\.networking\.k8s\.io/bbr-managed}'
+# Must be "true"
+
 # If Vault rotation is slow, check ExternalSecret status
-oc get externalsecrets -n vault-dev -o wide
+oc get externalsecrets -n models-as-a-service -o wide
 ```
 
 ---

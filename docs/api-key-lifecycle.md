@@ -46,7 +46,7 @@ curl -sk -X POST "${MAAS_API}/api/v1/subscriptions/team-a-ml-engineering/keys" \
 ```bash
 # Test the newly created key
 curl -sk -w "\nHTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer <NEW_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
@@ -85,7 +85,7 @@ curl -sk -X DELETE "${MAAS_API}/api/v1/subscriptions/team-a-ml-engineering/keys/
 ```bash
 # This request should now fail immediately
 curl -sk -w "\nHTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer <REVOKED_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
@@ -128,7 +128,7 @@ read -p "  Paste the generated key: " API_KEY
 echo ""
 echo "=== Step 2: Verify key works ==="
 curl -sk -w "\n  HTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":5}'
@@ -141,7 +141,7 @@ read -p "  Press Enter after revoking..."
 echo ""
 echo "=== Step 4: Verify immediate revocation ==="
 curl -sk -w "\n  HTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":5}'

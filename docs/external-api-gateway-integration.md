@@ -67,7 +67,7 @@ spec:
   privateBaseURL: "https://maas-gateway.apps.cluster.example.com"
   mappingRules:
     - httpMethod: POST
-      pattern: "/llm-inference/"
+      pattern: "/models-as-a-service/"
       metricMethodRef: "ai-inference-calls"
       increment: 1
 ```
@@ -103,7 +103,7 @@ TOKEN=$(curl -sk "https://${KEYCLOAK_HOST}/realms/ai-bridge/protocol/openid-conn
   | jq -r '.access_token')
 
 # Pass the token to AI Bridge
-curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[...]}'
@@ -141,19 +141,19 @@ This provides two layers of authentication:
 
 ## Endpoint Configuration
 
-The AI Bridge exposes a single stable endpoint:
+The AI Bridge exposes a single stable endpoint per model:
 
 ```
-https://<MAAS_GW_HOST>/llm-inference/<model-name>/v1/
+https://<MAAS_GW_HOST>/models-as-a-service/<model-name>/v1/
 ```
 
 The external gateway points to this as its backend. Routes:
 
 | Path | Purpose |
 |------|---------|
-| `/llm-inference/<model>/v1/chat/completions` | Chat inference |
-| `/llm-inference/<model>/v1/completions` | Legacy completions |
-| `/llm-inference/<model>/v1/models` | Model metadata |
+| `/models-as-a-service/<model>/v1/chat/completions` | Chat inference |
+| `/models-as-a-service/<model>/v1/completions` | Legacy completions |
+| `/models-as-a-service/<model>/v1/models` | Model metadata |
 
 ---
 
@@ -171,7 +171,7 @@ The external gateway points to this as its backend. Routes:
 ```bash
 # Simulate what the external gateway would do:
 # 1. Resolve the AI Bridge endpoint
-BACKEND="https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
+BACKEND="https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1"
 
 # 2. Forward a request with the subscription's API key
 curl -sk "$BACKEND/chat/completions" \
