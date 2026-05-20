@@ -101,7 +101,7 @@ mirror:
 | Component | Image | Notes |
 |-----------|-------|-------|
 | Prometheus | Shipped with OpenShift | No additional mirror needed |
-| Grafana | Shipped with OpenShift | No additional mirror needed |
+| Perses Dashboard | Embedded in RHOAI 3.4 console | Tech Preview, no separate deployment |
 
 ---
 
@@ -115,6 +115,79 @@ mirror:
     ${INTERNAL_REGISTRY}/redhat-operator-index
   ```
 - GPU node images (NVIDIA driver, device plugin) are separate from this list and managed by the NVIDIA GPU Operator.
+
+## Disconnected Workarounds
+
+### Authorino WASM Plugin
+
+In disconnected environments, Authorino's WASM-based rate limiting integration (used by Kuadrant) requires the WASM binary to be available locally. The Kuadrant operator normally fetches it from an OCI registry at runtime.
+
+**Workaround**:
+1. Pre-pull the WASM module OCI artifact and mirror it:
+   ```bash
+   # Mirror the Kuadrant WASM plugin to internal registry
+   skopeo copy \
+     docker://quay.io/kuadrant/wasm-shim:latest \
+     docker://${INTERNAL_REGISTRY}/kuadrant/wasm-shim:latest
+   ```
+2. Configure the `WasmPlugin` resource to reference the mirrored location:
+   ```yaml
+   apiVersion: extensions.istio.io/v1alpha1
+   kind: WasmPlugin
+   metadata:
+     name: kuadrant-wasm-shim
+     namespace: istio-system
+   spec:
+     url: oci://${INTERNAL_REGISTRY}/kuadrant/wasm-shim:latest
+   ```
+3. If OCI-based WASM loading is not possible, use a `ConfigMap`-mounted approach:
+   ```bash
+   # Download the WASM binary
+   skopeo copy docker://quay.io/kuadrant/wasm-shim:latest dir:///tmp/wasm-shim
+   # Extract and create a ConfigMap (for small WASM files only)
+   oc create configmap wasm-shim-binary -n istio-system \
+     --from-file=plugin.wasm=/tmp/wasm-shim/wasm-plugin.wasm
+   ```
+
+### Artifactory as Mirror Registry
+
+For environments using JFrog Artifactory as the container registry:
+
+```bash
+# Configure Artifactory as a Docker V2 remote repository pointing to each source
+# Then reference in ImageContentSourcePolicy or ImageDigestMirrorSet (OCP 4.13+)
+
+# For OCP 4.13+, prefer ImageDigestMirrorSet over ImageContentSourcePolicy:
+cat <<EOF | oc apply -f -
+apiVersion: config.openshift.io/v1
+kind: ImageDigestMirrorSet
+metadata:
+  name: ai-bridge-artifactory-mirror
+spec:
+  imageDigestMirrors:
+    - mirrors:
+        - artifactory.internal.example.com/docker-remote/hashicorp/vault
+      source: docker.io/hashicorp/vault
+    - mirrors:
+        - artifactory.internal.example.com/docker-remote/external-secrets/external-secrets
+      source: ghcr.io/external-secrets/external-secrets
+    - mirrors:
+        - artifactory.internal.example.com/docker-remote/kuadrant/authorino
+      source: quay.io/kuadrant/authorino
+    - mirrors:
+        - artifactory.internal.example.com/docker-remote/kuadrant/limitador
+      source: quay.io/kuadrant/limitador
+    - mirrors:
+        - artifactory.internal.example.com/docker-remote/keycloak/keycloak
+      source: quay.io/keycloak/keycloak
+EOF
+```
+
+### Operator Catalogs for Disconnected
+
+Required operator catalogs to mirror:
+- `registry.redhat.io/redhat/redhat-operator-index:v4.17` — RHOAI, RHCL (Kuadrant), Serverless operators
+- `registry.redhat.io/redhat/certified-operator-index:v4.17` — NVIDIA GPU Operator, External Secrets Operator
 
 ---
 

@@ -20,7 +20,7 @@ spec:
             description: "Subscription {{ $labels.limitador_namespace }} has consumed {{ $value | humanizePercentage }} of its token quota."
         - alert: SubscriptionRateLimited
           expr: |
-            rate(limitador_requests_total{limited="true"}[5m]) > 0
+            rate(limited_calls{namespace="models-as-a-service"}[5m]) > 0
           for: 0m
           labels:
             severity: info

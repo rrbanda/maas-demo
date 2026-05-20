@@ -210,14 +210,14 @@ Rate limits enforced per-subscription using **tokens per hour**. Token-based lim
 - Limitador enforcing counters per subscription/user
 - Prometheus metrics: `authorized_calls`, `limited_calls`, `limitador_counter_value`
 
-**Tier configuration (higher priority = preferential scheduling under GPU contention):**
+**Tier configuration (higher priority = default subscription for API key creation when user belongs to multiple groups):**
 - Premium: 500,000 tokens/hr, priority 10
 - Standard: 100,000 tokens/hr, priority 5
 - Basic: 50,000 tokens/hr, priority 1
 
 #### B3. Tiered Access
 
-Multiple subscription tiers with independent rate limit policies. Each tier gets its own throughput allocation and scheduling priority (higher number = higher priority).
+Multiple subscription tiers with independent rate limit policies. Each tier gets its own throughput allocation. Priority (higher number = higher priority) determines the default subscription when a user belongs to multiple groups.
 
 #### B4. Usage Tracking
 
@@ -323,9 +323,10 @@ An inline content safety filter that inspects requests and responses for PII usi
 To replicate this in any environment:
 
 1. **RHOAI 3.4** operator installed on both clusters
-2. **RHCL operator** installed (Kuadrant/Authorino/Limitador) on both clusters
+2. **RHCL operator 1.2+** installed (Kuadrant/Authorino/Limitador) on both clusters
 3. **NVIDIA GPU Operator** on both clusters
 4. **Istio/Service Mesh** on gateway cluster (multi-cluster only)
 5. **Network connectivity** between clusters for multi-cluster routing
-6. **(Optional)** Enterprise OIDC provider (Keycloak, Okta, Azure AD) for SSO demo
-7. **(Optional)** HashiCorp Vault for secret rotation pattern demo
+6. **TLS**: Authorino must trust the service-CA for MaaS API communication (see `manifests/platform/kuadrant/authorino-tls.yaml`)
+7. **(Optional)** Enterprise OIDC provider (Keycloak, Okta, Azure AD) for SSO demo
+8. **(Optional)** HashiCorp Vault for secret rotation pattern demo

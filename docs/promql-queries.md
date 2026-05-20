@@ -1,9 +1,14 @@
 # Per-Subscription PromQL Queries
 
-Pre-built queries for monitoring AI Bridge subscription usage in OpenShift Console → Observe → Metrics.
+Pre-built queries for monitoring MaaS subscription usage in OpenShift Console → Observe → Metrics.
 
 > **Metric sources**: Authorino (auth decisions), Limitador (rate limiting/token metering), vLLM (inference performance).
 > These metrics are exposed when the MaaS controller auto-generates `TokenRateLimitPolicy` and `AuthPolicy` resources from your `MaaSSubscription` and `MaaSAuthPolicy` CRs.
+>
+> **Official Limitador metrics** (RHOAI 3.4):
+> - `authorized_hits` — token count for authorized requests
+> - `authorized_calls` — request count for authorized requests
+> - `limited_calls` — request count for rate-limited (429) requests
 
 ---
 
@@ -28,7 +33,12 @@ increase(auth_server_authconfig_total[1h])
 
 ## Rate Limiting & Token Metering
 
-### Authorized calls (requests that passed rate limiting)
+### Authorized tokens (token-count metric per subscription)
+```promql
+authorized_hits{namespace="models-as-a-service"}
+```
+
+### Authorized calls (request count that passed rate limiting)
 ```promql
 authorized_calls{namespace="models-as-a-service"}
 ```
@@ -38,29 +48,20 @@ authorized_calls{namespace="models-as-a-service"}
 limited_calls{namespace="models-as-a-service"}
 ```
 
-### Current rate limit counter value per subscription
-```promql
-limitador_counter_value{namespace="models-as-a-service"}
-```
-
-### Rate limit utilization percentage per subscription
-```promql
-limitador_counter_value / limitador_counter_max_value
-```
-
-### Requests being rate limited (429s issued) — alternative
-```promql
-rate(limitador_requests_total{limited="true"}[5m])
-```
-
 ### Token consumption rate per subscription
 ```promql
-rate(limitador_counter_value[5m])
+rate(authorized_hits{namespace="models-as-a-service"}[5m])
 ```
 
-### Time until rate limit reset
+### Rate-limited request rate (429s per second)
 ```promql
-limitador_counter_ttl_seconds
+rate(limited_calls{namespace="models-as-a-service"}[5m])
+```
+
+### Ratio of rate-limited to total requests
+```promql
+limited_calls{namespace="models-as-a-service"}
+/ (authorized_calls{namespace="models-as-a-service"} + limited_calls{namespace="models-as-a-service"})
 ```
 
 ---
@@ -130,12 +131,12 @@ sum(rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class=~"4|5"}[5m]))
 
 ### Total tokens consumed per subscription (last 24h)
 ```promql
-increase(limitador_counter_value{namespace="models-as-a-service"}[24h])
+increase(authorized_hits{namespace="models-as-a-service"}[24h])
 ```
 
-### Subscription quota remaining
+### Total requests per subscription (last 24h)
 ```promql
-limitador_counter_max_value - limitador_counter_value
+increase(authorized_calls{namespace="models-as-a-service"}[24h])
 ```
 
 ### Peak concurrent requests per subscription (over 1h)
@@ -154,9 +155,10 @@ max_over_time(vllm:num_requests_running[1h])
 
 ## Dashboard Integration
 
-These queries power the `ai-gateway-dashboard` ConfigMap deployed via:
-```
-manifests/platform/observability/dashboard-configmap.yaml
-```
+RHOAI 3.4 includes a built-in **Perses dashboard** (Technology Preview) embedded in the OpenShift AI console that visualizes token usage, rate limit status, and subscription activity.
 
-Navigate to **Observe → Dashboards → AI Gateway - Multi-Tenant Inference** for the pre-built dashboard.
+For custom dashboards, these queries can be used in:
+- **OpenShift Console → Observe → Metrics** (ad-hoc queries)
+- **PrometheusRule** alerts (see `manifests/platform/observability/prometheus-rules.yaml`)
+
+Navigate to **OpenShift AI Console → Models-as-a-Service → Usage Dashboard** for the built-in Perses dashboard.

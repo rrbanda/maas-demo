@@ -1,5 +1,7 @@
 # Three-tier subscription model demonstrating per-team governance.
-# Priority: higher number = higher priority (gets scheduling preference under GPU contention).
+# Priority: higher number = higher priority. Determines the default subscription selected
+# when a user with multiple group memberships generates an API key without specifying one.
+# Recommended scheme: production=100, staging=50, dev=0, sandbox=-10.
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSSubscription
 metadata:

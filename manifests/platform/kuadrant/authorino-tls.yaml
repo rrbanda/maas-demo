@@ -1,0 +1,46 @@
+# Authorino TLS Configuration
+# Per RHOAI 3.4 docs section 1.4: Authorino must trust the OpenShift service-CA
+# to validate TLS certificates when communicating with the MaaS API.
+#
+# The service-ca-bundle ConfigMap is auto-populated by the service-ca operator
+# when annotated with `service.beta.openshift.io/inject-cabundle: "true"`.
+# Authorino references this CA bundle to establish mTLS with the MaaS API.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authorino-ca-cert
+  namespace: redhat-ods-applications
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+data: {}
+---
+# Authorino must be configured to use the injected CA bundle.
+# The RHCL/Kuadrant operator handles this automatically when the Authorino CR
+# specifies the evaluator CA cert source. If manual configuration is needed:
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authorino-tls-config
+  namespace: redhat-ods-applications
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+data:
+  README: |
+    TLS Configuration for Authorino ↔ MaaS API communication.
+    
+    The OpenShift service-CA automatically provisions certificates for services
+    annotated with `service.beta.openshift.io/serving-cert-secret-name`.
+    
+    Authorino trusts these certificates via the `authorino-ca-cert` ConfigMap
+    which is injected with the cluster's service-CA bundle.
+    
+    If Authorino reports TLS errors connecting to the MaaS API:
+    1. Verify the CA bundle is injected:
+       oc get cm authorino-ca-cert -n redhat-ods-applications -o yaml
+    2. Verify the MaaS API service has a serving cert:
+       oc get service maas-api -n redhat-ods-applications -o jsonpath='{.metadata.annotations}'
+    3. Restart Authorino if the CA was recently rotated:
+       oc rollout restart deployment/authorino -n redhat-ods-applications

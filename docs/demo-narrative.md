@@ -6,6 +6,20 @@
 > **Target duration**: 45–60 minutes for full walkthrough.
 > **Prerequisites**: Cluster deployed via `deploy-all.sh` or ArgoCD, `config.env` populated.
 
+> **PoC Success Criteria Mapping** (from AI Bridge Scoping Document):
+> | Demo Section | PoC Stage | Success Criteria |
+> |---|---|---|
+> | 1. GitOps Foundation | Stage A | SC-A1: Declarative multi-cluster deployment via ArgoCD |
+> | 2. Model Registration | Stage A | SC-A2: Model available and serving inference |
+> | 3.1 Multi-tenant Subscriptions | Stage B | SC-B1: Per-team subscription isolation |
+> | 3.2 API Key Lifecycle | Stage B | SC-B2: Key generation, rotation, revocation |
+> | 3.3 Token-based Rate Limiting | Stage B | SC-B3: Token-level enforcement, 429 on breach |
+> | 3.4 Observability | Stage B | SC-B4: Usage visibility via built-in dashboard |
+> | 3.5 Multi-cluster Gateway | Stage C | SC-C1: Cross-cluster routing with OIDC validation |
+> | 4.1 Guardrails | Beyond Scope | Bonus demo — not required for PoC success |
+>
+> **Deployment Profile**: Multi-cluster (gateway cluster + inference cluster). This demonstrates cross-cluster routing and centralized governance — a key differentiator for enterprise deployments.
+
 ---
 
 ## Pre-Demo Setup Checklist
@@ -229,7 +243,7 @@ oc get authpolicies -A -l opendatahub.io/managed=true
 
 > **Technical Detail — MaaSSubscription Spec (maas.opendatahub.io/v1alpha1)**:
 >
-> - `spec.priority`: Higher number = higher priority (premium=10, basic=1). Affects scheduling during GPU contention.
+> - `spec.priority`: Higher number = higher priority (premium=10, basic=1). Determines the default subscription when a user with multiple group memberships generates an API key without specifying one.
 > - `spec.modelRefs[].tokenRateLimits`: REQUIRED (MinItems=1). Each entry has `limit` (1 to 1,000,000,000) and `window` (pattern: `^[1-9]\d{0,3}(s|m|h)$` — seconds, minutes, or hours only).
 > - `spec.owner`: At least one group or user required. Maps to OpenShift/OIDC group memberships.
 > - `status.phase`: Active | Failed. Only Active subscriptions can generate API keys.
@@ -255,7 +269,7 @@ oc get maassubscription team-c-app-developers -n models-as-a-service \
 # Expected: [{"limit": 50000, "window": "1h"}]
 ```
 
-**TELL**: Three teams, three tiers: premium (500K tokens/hr, priority 10), standard (100K tokens/hr, priority 5), basic (50K tokens/hr, priority 1). Each operates independently. A burst from the basic tier cannot impact the premium tier. Higher priority means preferential scheduling under GPU contention. This is all declarative — a YAML change, not an infrastructure project.
+**TELL**: Three teams, three tiers: premium (500K tokens/hr, priority 10), standard (100K tokens/hr, priority 5), basic (50K tokens/hr, priority 1). Each operates independently. A burst from the basic tier cannot impact the premium tier. Priority determines which subscription is selected as the default when a user belongs to multiple groups — it does not affect inference scheduling. This is all declarative — a YAML change, not an infrastructure project.
 
 **Estimated time**: 4 minutes
 
@@ -411,11 +425,11 @@ oc get maassubscriptions -n models-as-a-service \
 # team-b-data-science       standard  100000      5
 # team-c-app-developers     basic     50000       1
 
-# Priority affects scheduling during GPU contention
-# Higher number = higher priority (team-a gets preference when GPUs are saturated)
+# Priority determines default subscription selection during API key creation
+# Higher number = higher priority (used when a user belongs to multiple groups)
 ```
 
-**TELL**: Three tiers, each with independent rate limits. Priority determines scheduling order during GPU contention — higher number means higher priority. This is all configured declaratively — changing a tier is a YAML edit, not a re-architecture.
+**TELL**: Three tiers, each with independent rate limits. Priority determines which subscription is selected as the default when a user belongs to multiple groups and generates an API key without specifying one. This is all configured declaratively — changing a tier is a YAML edit, not a re-architecture.
 
 **Estimated time**: 2 minutes
 
@@ -594,40 +608,43 @@ echo "Secret rotation completed with zero downtime."
 
 ### 3.4 Observability — Dashboards and Metrics
 
-**TELL**: Governance without observability is incomplete. Operators need to see: Who is using what? Are rate limits being hit? What is the inference latency? MaaS exposes all of this through standard Prometheus metrics and pre-built dashboards.
+**TELL**: Governance without observability is incomplete. Operators need to see: Who is using what? Are rate limits being hit? What is the inference latency? RHOAI 3.4 MaaS includes a built-in **Perses dashboard** embedded in the OpenShift AI console (Technology Preview). It visualizes token usage, rate limit status, and subscription activity out of the box. Additionally, standard Prometheus metrics are exposed for custom alerting.
+
+> **Note**: The MaaS observability dashboard is Perses-based and embedded in the OpenShift AI console. It is a **Technology Preview** feature in RHOAI 3.4 — not a separate Grafana deployment.
 
 **SHOW**:
 ```bash
-# User workload monitoring is enabled
+# User workload monitoring is enabled (prerequisite)
 oc get configmap cluster-monitoring-config -n openshift-monitoring \
   -o jsonpath='{.data.config\.yaml}'
 # Expected: enableUserWorkload: true
 
-# Dashboard is deployed
-oc get configmap ai-gateway-dashboard -n openshift-config-managed \
-  -o jsonpath='{.data}' | python3 -c "import json,sys;d=json.load(sys.stdin);print(list(d.keys())[0])"
-# Expected: ai-gateway-inference.json
+# Verify Limitador metrics are being scraped
+oc get servicemonitor -n redhat-ods-applications | grep -i limitador
 
-# Key metrics available:
-echo "=== Key PromQL Queries ==="
-echo "1. Auth decisions:       rate(auth_server_authconfig_total[5m])"
-echo "2. Authorized calls:     authorized_calls{namespace='models-as-a-service'}"
-echo "3. Rate-limited calls:   limited_calls{namespace='models-as-a-service'}"
-echo "4. Token quota usage:    limitador_counter_value / limitador_counter_max_value"
-echo "5. Token throughput:     rate(vllm:generation_tokens_total[5m])"
-echo "6. Time to First Token:  histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))"
-echo "7. Error rate:           rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class=~'4|5'}[5m])"
+# Key Limitador metrics (source of truth for rate limiting):
+echo "=== Key PromQL Queries (Limitador) ==="
+echo "1. Authorized tokens:    sum(authorized_hits{namespace='models-as-a-service'})"
+echo "2. Authorized calls:     sum(authorized_calls{namespace='models-as-a-service'})"
+echo "3. Rate-limited calls:   sum(limited_calls{namespace='models-as-a-service'})"
+echo ""
+echo "=== Inference Metrics (vLLM) ==="
+echo "4. Token throughput:     rate(vllm:generation_tokens_total[5m])"
+echo "5. Time to First Token:  histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))"
+echo "6. Error rate:           rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class=~'4|5'}[5m])"
 ```
 
-Navigate to OpenShift Console → Observe → Dashboards and walk through each panel.
+Navigate to OpenShift AI Console → Models-as-a-Service → Usage Dashboard (Perses-based, Tech Preview).
 
-**TELL**: Dashboard panels covering auth decisions, rate limit hits, vLLM performance, GPU utilization, queue depth, and error rates. All per-subscription where applicable. This is the same Prometheus stack already deployed — no additional infrastructure.
+**TELL**: The built-in Perses dashboard shows token consumption per subscription, rate limit utilization, and 429 rejection rates. For custom alerting, the same Limitador metrics (`authorized_hits`, `authorized_calls`, `limited_calls`) are available via the Prometheus stack already deployed — no additional infrastructure needed.
 
 **Estimated time**: 4 minutes
 
 ---
 
 ## 4. BONUS CAPABILITIES (Beyond PoC Scope)
+
+> **Note**: The following sections demonstrate additional capabilities that are NOT required for PoC success criteria validation. They are included as forward-looking differentiators.
 
 ### 4.1 Guardrails — PII Regex Detection
 
