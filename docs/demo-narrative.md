@@ -1,27 +1,98 @@
 # AI Bridge PoC — Tell-Show-Tell Demo Narrative
 
-> **Terminology**: "AI Bridge" is the PoC project name. The official RHOAI 3.4 product feature is **Models-as-a-Service (MaaS)**. Where this document says "AI Bridge", the product equivalent is "MaaS" or "Models-as-a-Service governance gateway".
+> **Terminology**: "AI Bridge" is the PoC project name. The official RHOAI 3.4 product feature is **Models-as-a-Service (MaaS)**. Where this document says "AI Bridge", the product equivalent is "MaaS" or "Models-as-a-Service governance layer".
 
 > **Format**: Each section follows TELL (why) → SHOW (how) → TELL (so what).
 > **Target duration**: 45–60 minutes for full walkthrough.
-> **Prerequisites**: Cluster deployed via `deploy-all.sh` or ArgoCD, `config.env` populated.
+> **Prerequisites**: Cluster deployed via ArgoCD from `github.com/rrbanda/maas-demo`, `config.env` populated.
 
-> **PoC Success Criteria Mapping** (from AI Bridge Scoping Document):
+> **PoC Success Criteria Mapping**:
 > | Demo Section | PoC Stage | Success Criteria |
 > |---|---|---|
-> | 1. GitOps Foundation | Stage A | SC-A1: Declarative multi-cluster deployment via ArgoCD |
-> | 2. Model Registration | Stage A | SC-A2: Model available and serving inference |
-> | 3.1 Multi-tenant Subscriptions | Stage B | SC-B1: Per-team subscription isolation |
-> | 3.2 API Key Lifecycle | Stage B | SC-B2: Key generation, rotation, revocation |
-> | 3.3 Token-based Rate Limiting | Stage B | SC-B3: Token-level enforcement, 429 on breach |
-> | 3.4 Observability | Stage B | SC-B4: Usage visibility via built-in dashboard |
-> | 4.1 Guardrails | Beyond Scope | Bonus — not required for PoC success |
-> | 4.2 Multi-cluster Routing | Beyond Scope | Proof-of-mechanism only; final topology requires customer input |
+> | 1. GitOps Foundation | Stage A | SC-A1: Declarative deployment via ArgoCD |
+> | 2. Platform + Model | Stage A | SC-A2: Model available and serving inference |
+> | 3. API Compatibility | Stage A | SC-A3: OpenAI-compatible endpoint |
+> | 4. Multi-Tenant Subscriptions | Stage B | SC-B1: Per-team subscription isolation |
+> | 5. API Key Lifecycle | Stage B | SC-B2: Key generation, rotation, revocation |
+> | 6. Token-based Rate Limiting | Stage B | SC-B3: Token-level enforcement, 429 on breach |
+> | 7. Observability | Stage B | SC-B4: Usage visibility via metrics |
+> | 8. OIDC/SSO + RBAC | Stage C | SC-C1: Enterprise identity federation |
+> | 9. Secret Rotation | Stage C | SC-C2: Zero-downtime credential rotation |
+> | Bonus: Guardrails | Beyond Scope | Not required for PoC success |
+> | Bonus: Multi-cluster Routing | Beyond Scope | Proof-of-mechanism only |
 >
 > **Deployment Profile**: Multi-cluster (gateway cluster + inference cluster).
-> - **What this demonstrates**: The _mechanism_ of OIDC-authenticated cross-cluster routing via Istio (ServiceEntry + DestinationRule + EnvoyFilter). A dedicated ingress cluster validates JWT tokens and forwards to a remote inference cluster over TLS.
-> - **What this is NOT**: A production-ready multi-cluster topology. The routing is static (hardcoded ServiceEntry), there is no dynamic fleet discovery (no RHACM/Submariner/Skupper), governance (MaaS subscriptions/rate limits) still lives on the inference cluster rather than the ingress tier, and it's a 1:1 mapping (not fan-out to multiple inference clusters).
-> - **Customer note**: Final topology design (active-active pool, ingress-fan-out, governance placement) requires confirmation of the target multi-cluster architecture before engineering.
+> - **What this demonstrates**: The _mechanism_ of OIDC-authenticated cross-cluster routing via Istio. A dedicated ingress cluster validates JWT tokens and forwards to a remote inference cluster over TLS.
+> - **What this is NOT**: A production-ready multi-cluster topology. Routing is static (hardcoded ServiceEntry), no fleet discovery (no RHACM/Submariner/Skupper), and governance lives on the inference cluster.
+> - **Customer note**: Final topology requires confirmation of target architecture before production design.
+
+---
+
+## Glossary and Key Concepts
+
+Before the demo, ensure the audience understands these terms:
+
+| Term | What it is | Why it matters |
+|------|-----------|----------------|
+| **RHOAI** | Red Hat OpenShift AI — the AI/ML platform on OpenShift | Provides the operator that installs and manages MaaS |
+| **MaaS (Models-as-a-Service)** | RHOAI 3.4 governance layer for model endpoints | Turns raw GPU endpoints into managed API products |
+| **Tenant** | Singleton CRD (`default-tenant`) in `models-as-a-service` namespace | Anchors the entire MaaS config: binds gateway, sets key expiration policy |
+| **MaaSModelRef** | CRD that registers a deployed model for governance | Model won't be accessible via MaaS until this exists and is `Ready` |
+| **MaaSSubscription** | CRD defining per-team quota (token rate limits + priority) | Each team gets isolated access with independent rate limits |
+| **MaaSAuthPolicy** | CRD defining which groups/users can access which models | Controls WHO can generate API keys and call models |
+| **Kuadrant** | Red Hat Connectivity Link (RHCL) — API management for K8s-native gateways | Provides the policy framework (auth + rate limiting) that MaaS builds on |
+| **Authorino** | Kuadrant's auth engine | Validates API keys and JWT tokens on every request |
+| **Limitador** | Kuadrant's rate limiting engine | Counts tokens per subscription, enforces limits, returns 429 |
+| **TokenRateLimitPolicy** | Auto-generated CRD (by MaaS controller) | You never create this — it's generated from `MaaSSubscription.spec.tokenRateLimits` |
+| **Perses Dashboard** | Built-in observability dashboard (Technology Preview) | Embedded in OpenShift AI console; shows token usage per subscription |
+| **Tech Preview** | Red Hat support term: feature is functional but not production-supported | May change APIs or behavior in future releases; use at own risk |
+| **`sk-oai-`** | API key prefix for MaaS-generated keys | Intentionally similar to OpenAI's `sk-` format for developer familiarity |
+
+### CRD Relationship Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        YOU CREATE (declarative YAML)                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Tenant                 MaaSSubscription         MaaSAuthPolicy        │
+│   (1 per cluster)        (1 per team)             (1 per model)         │
+│   ┌──────────────┐       ┌──────────────────┐     ┌────────────────┐   │
+│   │ gatewayRef   │       │ owner: [groups]  │     │ modelRef       │   │
+│   │ maxExpDays   │       │ modelRefs:       │     │ allowedGroups  │   │
+│   │              │       │   tokenRateLimits│     │                │   │
+│   └──────┬───────┘       │   priority       │     └────────┬───────┘   │
+│          │               └────────┬─────────┘              │           │
+│          │                        │                        │           │
+│   MaaSModelRef ◄──────────────────┼────────────────────────┘           │
+│   (1 per model)                   │                                    │
+│   ┌──────────────┐                │                                    │
+│   │ model name   │                │                                    │
+│   │ namespace    │                │                                    │
+│   └──────────────┘                │                                    │
+│                                   │                                    │
+├───────────────────────────────────┼────────────────────────────────────┤
+│             MaaS CONTROLLER AUTO-GENERATES (never create manually)      │
+├───────────────────────────────────┼────────────────────────────────────┤
+│                                   │                                    │
+│                                   ▼                                    │
+│   HTTPRoute              TokenRateLimitPolicy        AuthPolicy        │
+│   (gateway.networking    (kuadrant.io/v1alpha1)      (kuadrant.io/     │
+│    .k8s.io/v1)                                        v1beta2)         │
+│   ┌──────────────┐       ┌──────────────────┐     ┌────────────────┐  │
+│   │ routes /v1/* │       │ per-subscription │     │ API key        │  │
+│   │ to model pod │       │ token counting   │     │ validation via │  │
+│   │              │       │ via Limitador    │     │ Authorino      │  │
+│   └──────────────┘       └──────────────────┘     └────────────────┘  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+Key rule: MaaSModelRef becomes "Ready" ONLY when:
+  1. Tenant exists and is Active
+  2. At least one MaaSSubscription references this model
+  3. At least one MaaSAuthPolicy covers this model
+  4. The model runtime is healthy (pod Running)
+```
 
 ---
 
@@ -31,18 +102,18 @@
 # Source environment config
 source scripts/config.env
 
-# Verify cluster access
+# Verify cluster access (inference cluster)
 oc whoami --show-server
 
 # Verify all 5 MaaS CRDs are registered
 oc api-resources | grep maas.opendatahub.io
 # Expected: externalmodels, maasauthpolicies, maasmodelrefs, maassubscriptions, tenants
 
-# Confirm Tenant is Active (controls gateway + key policies)
+# Confirm Tenant is Active
 oc get tenant default-tenant -n models-as-a-service -o jsonpath='{.status.phase}'
 # Expected: Active
 
-# Confirm model is serving (takes ~5 min after deploy)
+# Confirm model is serving
 oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
 # Expected: 1/1 Running
 
@@ -50,114 +121,134 @@ oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
 oc get maassubscriptions -n models-as-a-service
 # Expected: 3 subscriptions, all "Active"
 
-# Confirm MaaSModelRef has governance attached
+# Confirm MaaSModelRef is Ready
 oc get maasmodelref qwen25-7b-instruct -n llm-inference -o jsonpath='{.status.phase}'
-# Expected: Ready (means GovernanceAttached + RuntimeReady)
+# Expected: Ready
 ```
 
 ---
 
-## 1. FOUNDATION (Stage A)
+## 1. GITOPS FOUNDATION (Stage A)
 
-### 1.1 Platform Overview — RHOAI 3.4 with MaaS Enabled
-
-**TELL**: RHOAI 3.4 introduces Models-as-a-Service as a GA capability. It adds a governance layer on top of model serving — turning raw GPU endpoints into managed API products with authentication, rate limiting, and usage tracking. This is enabled with a single configuration flag.
-
-> **Technical Detail — MaaS CRD Model (all `maas.opendatahub.io/v1alpha1`)**:
->
-> | CRD | Purpose |
-> |-----|---------|
-> | `Tenant` | Singleton (`default-tenant`) — configures gateway ref, key expiration, telemetry |
-> | `MaaSModelRef` | Registers a model for governance; must pair with auth policy + subscription |
-> | `MaaSAuthPolicy` | Defines which groups/users can access which models |
-> | `MaaSSubscription` | Per-team quota with inline `tokenRateLimits` and priority |
-> | `ExternalModel` | (Tech Preview) Routes to external providers like OpenAI, Anthropic |
->
-> The `Tenant` CR **must exist** before any subscriptions can become Active. It defines the gateway reference (`maas-default-gateway` in `openshift-ingress`) and the maximum API key expiration policy.
+**TELL**: Everything in this demo is deployed declaratively from a Git repository. ArgoCD watches the repo and reconciles the desired state to the cluster. There are no manual `oc apply` steps in production — a Git commit IS the deployment. This means full audit trail, rollback capability, and reproducibility.
 
 **SHOW**:
 ```bash
-# The DataScienceCluster CR enables MaaS
+# ArgoCD applications managing the stack
+oc get applications.argoproj.io -n openshift-gitops | grep maas-demo
+# Expected: maas-demo-inference (Synced/Healthy) on this cluster
+# On gateway cluster: maas-demo-gateway (Synced/Healthy)
+
+# Repository structure
+echo "github.com/rrbanda/maas-demo"
+echo "├── manifests/          ← base resources (no secrets, no env-specific values)"
+echo "│   ├── model/          ← Tenant, MaaSModelRef, MaaSSubscriptions, MaaSAuthPolicy"
+echo "│   ├── platform/       ← Kuadrant, observability, Vault, Keycloak"
+echo "│   └── ai-gateway/     ← Multi-cluster gateway (Istio)"
+echo "├── profiles/           ← composition profiles (single-cluster or multi-cluster)"
+echo "├── clusters/live/      ← environment overlays (Kustomize patches)"
+echo "└── scripts/            ← deploy, teardown, validate"
+
+# Show the ArgoCD app is tracking our repo
+oc get application maas-demo-inference -n openshift-gitops \
+  -o jsonpath='{.spec.source.repoURL}{"\n"}{.spec.source.targetRevision}'
+# Expected: https://github.com/rrbanda/maas-demo / main
+```
+
+**TELL**: Infrastructure as code, secrets in Vault (never in Git), deployment via ArgoCD. A new environment is a new Kustomize overlay — no manual steps, fully auditable, reproducible. Every change you see today was a Git commit.
+
+**Estimated time**: 3 minutes
+
+---
+
+## 2. PLATFORM + MODEL (Stage A)
+
+### 2.1 RHOAI 3.4 with MaaS Enabled
+
+**TELL**: RHOAI 3.4 introduces Models-as-a-Service as a governance layer on top of model serving. It turns raw GPU endpoints into managed API products with authentication, rate limiting, and usage tracking. Enabling it is a single field in the `DataScienceCluster` CR.
+
+**SHOW**:
+```bash
+# MaaS is enabled in the DataScienceCluster CR
 oc get datasciencecluster default-dsc \
   -o jsonpath='{.spec.components.kserve.modelsAsService.managementState}'
 # Expected: Managed
 
-# Platform components are automatically provisioned
+# Platform pods are automatically provisioned
 oc get pods -n redhat-ods-applications | grep maas
-# Expected: maas-api, maas-controller pods Running
+# Expected: maas-api-* Running, maas-controller-* Running
 
-# Tenant CR — the MaaS control plane anchor
-oc get tenant default-tenant -n models-as-a-service -o yaml
-# Key fields:
-#   spec.gatewayRef.name: maas-default-gateway
-#   spec.gatewayRef.namespace: openshift-ingress
-#   spec.apiKeys.maxExpirationDays: 90
-#   status.phase: Active
+# The Tenant CR anchors the entire MaaS configuration
+oc get tenant default-tenant -n models-as-a-service -o jsonpath='{.spec}' | python3 -m json.tool
+# Expected:
+# {
+#   "apiKeys": { "maxExpirationDays": 90 },
+#   "gatewayRef": { "name": "maas-default-gateway", "namespace": "openshift-ingress" }
+# }
 ```
 
-**TELL**: With one configuration change, RHOAI 3.4 provisions the entire MaaS control plane — API server, controller, gateway infrastructure. The `Tenant` CR anchors the configuration: it binds MaaS to a specific gateway and sets organization-wide key policies. No manual assembly of components required.
+**TELL**: With one configuration change (`managementState: Managed`), RHOAI provisions the entire MaaS control plane — API server, controller, and gateway infrastructure. The `Tenant` CR is the organizational anchor: it binds MaaS to a specific gateway and sets the maximum API key expiration policy (90 days). Nothing else works until the Tenant exists and is Active.
 
 **Estimated time**: 3 minutes
 
 ---
 
-### 1.2 Model Deployed and Serving
+### 2.2 Model Deployed and Serving
 
-**TELL**: A model is deployed using the standard RHOAI workflow. The `LLMInferenceService` CR (API: `serving.kserve.io/v1alpha2`) defines the model, resources, and GPU requirements. Once deployed, a `MaaSModelRef` registers it for governance. The model becomes "Ready" only when it has both governance attached (subscription + auth policy) AND the runtime is healthy.
-
-> **Technical Detail — MaaSModelRef Status Phases**:
->
-> | Phase | Meaning |
-> |-------|---------|
-> | Pending | Awaiting governance pairing or backend readiness |
-> | Ready | Governed AND runtime-healthy (at least one active subscription + auth policy) |
-> | Unhealthy | Governed but runtime-failed |
-> | Failed | Non-recoverable reconciliation error |
-> | Invalid | Bad spec (e.g., referencing non-existent model) |
->
-> Status conditions: `GovernanceAttached`, `RuntimeReady`, `Ready`
+**TELL**: A model is deployed using the `LLMInferenceService` CR (API: `serving.kserve.io/v1alpha2`). Once deployed, a `MaaSModelRef` in the `llm-inference` namespace registers it for governance. The model becomes "Ready" only when governance is attached (at least one subscription + auth policy paired) AND the runtime is healthy.
 
 **SHOW**:
 ```bash
-# Model CR and its status (API: serving.kserve.io/v1alpha2)
+# LLMInferenceService — the model deployment CR
 oc get llminferenceservice -n llm-inference
-# Expected: qwen25-7b-instruct with Ready status
+# Expected: qwen25-7b-instruct with Ready=True
 
 # Model pod running with GPU
 oc get pods -n llm-inference -l app.kubernetes.io/part-of=llminferenceservice
-# Expected: 1/1 Running
+# Expected: qwen25-7b-instruct-kserve-* 1/1 Running
 
-# MaaSModelRef — governance registration status
+# MaaSModelRef — governance registration
 oc get maasmodelref qwen25-7b-instruct -n llm-inference \
-  -o jsonpath='{.status.phase}{"\n"}{.status.conditions[*].type}{"\n"}'
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,ENDPOINT:.status.endpoint'
 # Expected:
-#   Ready
-#   GovernanceAttached RuntimeReady Ready
+# NAME                 PHASE   ENDPOINT
+# qwen25-7b-instruct   Ready   https://<ELB>/llm-inference/qwen25-7b-instruct
 
-# The MaaSModelRef discovers the endpoint automatically
+# The MaaSModelRef discovered the gateway endpoint automatically
 oc get maasmodelref qwen25-7b-instruct -n llm-inference \
   -o jsonpath='{.status.endpoint}'
-# Expected: the inference service's internal URL
+# Expected: https://<MAAS_GW_ELB>/llm-inference/qwen25-7b-instruct
 ```
 
-**TELL**: The model is deployed with a declarative CR. RHOAI handles the vLLM runtime, GPU scheduling, and endpoint registration. The `MaaSModelRef` status proves governance is attached — the model won't serve traffic until subscriptions and auth policies are in place.
+**TELL**: The model is deployed with a declarative CR. RHOAI handles the vLLM runtime, GPU scheduling, and endpoint registration. The `MaaSModelRef` status of `Ready` proves governance is attached — the model won't serve traffic through the MaaS gateway until subscriptions and auth policies are in place.
 
 **Estimated time**: 3 minutes
 
 ---
 
-### 1.3 OpenAI API Compatibility — Base URL Swap Only
+## 3. API COMPATIBILITY (Stage A)
 
-**TELL**: One of the biggest adoption barriers is API compatibility. Existing applications using the OpenAI API format should work with the AI Bridge (MaaS gateway) endpoint by changing only the base URL. No SDK changes, no code modifications. The API key format is `sk-oai-*` — intentionally similar to OpenAI's format for developer familiarity.
+### 3.1 OpenAI API — Base URL Swap Only
+
+**TELL**: The biggest adoption barrier is API compatibility. Existing applications using the OpenAI API format work with the MaaS gateway by changing only the base URL. No SDK changes, no code modifications. The API key format is `sk-oai-*` — intentionally similar to OpenAI's format for developer familiarity.
 
 **SHOW**:
 ```bash
-# Standard OpenAI /v1/models endpoint (requires valid API key)
-curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models" \
-  -H "Authorization: Bearer ${API_KEY}" | python3 -m json.tool
-# Expected: {"object": "list", "data": [{"id": "qwen25-7b-instruct", "object": "model", ...}]}
+# The MaaS gateway exposes a standard OpenAI-compatible endpoint
+echo "MaaS endpoint: https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
 
-# Standard OpenAI /v1/chat/completions
+# Without auth → 401
+curl -sk --max-time 10 -w "HTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models"
+# Expected: HTTP 401
+
+# With invalid key → 403
+curl -sk --max-time 10 -w "HTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models" \
+  -H "Authorization: Bearer sk-oai-invalid-key"
+# Expected: HTTP 403
+
+# With valid API key → standard OpenAI response
 curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
@@ -174,7 +265,7 @@ curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/compl
 from openai import OpenAI
 client = OpenAI(
     base_url="https://<MAAS_GW_HOST>/llm-inference/qwen25-7b-instruct/v1",
-    api_key="sk-oai-..."  # MaaS-generated key (same sk- prefix convention)
+    api_key="sk-oai-..."  # MaaS-generated key
 )
 response = client.chat.completions.create(
     model="qwen25-7b-instruct",
@@ -190,22 +281,36 @@ print(response.choices[0].message.content)
 
 ---
 
-### 1.4 Architecture Positioning — Where AI Bridge (MaaS) Sits
+## 4. WHERE MAAS SITS — Architecture Positioning
 
-**TELL**: The AI Bridge (officially: Models-as-a-Service governance layer) is not replacing existing API management infrastructure. It complements it. An external API gateway continues to handle external consumer onboarding and organization-level policies. The MaaS gateway handles what generic gateways cannot: model-aware authentication, per-subscription token metering, and inference-specific rate limiting.
+**TELL**: MaaS is NOT replacing existing API management infrastructure. It complements it. An external API gateway handles external consumer onboarding and organization-level policies. The MaaS gateway handles what generic gateways cannot: model-aware authentication, per-subscription token metering, and inference-specific rate limiting.
 
-> **Technical Detail — What MaaS Controller Auto-Generates**:
->
-> When you create a `MaaSSubscription` + `MaaSAuthPolicy` + `MaaSModelRef`, the MaaS controller automatically generates:
-> 1. `HTTPRoute` (gateway.networking.k8s.io/v1) — routing to the model via the gateway
-> 2. `AuthPolicy` (kuadrant.io/v1beta2) — API key validation via Authorino
-> 3. `TokenRateLimitPolicy` (kuadrant.io/v1alpha1) — per-subscription token metering via Limitador
->
-> You never create these manually. The MaaS controller reconciles them from your high-level CRDs.
+When you create a `MaaSSubscription` + `MaaSAuthPolicy` + `MaaSModelRef`, the MaaS controller automatically generates three Kuadrant resources — you never create them manually:
+1. `HTTPRoute` (gateway.networking.k8s.io/v1) — routes traffic to the model
+2. `AuthPolicy` (kuadrant.io/v1beta2) — API key validation via Authorino
+3. `TokenRateLimitPolicy` (kuadrant.io/v1alpha1) — per-subscription token counting via Limitador
 
-**SHOW** (diagram on whiteboard or slide):
+**SHOW**:
+```bash
+# The MaaS gateway is a single stable URL
+echo "MaaS Gateway: https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
+
+# Auto-generated HTTPRoute (created by MaaS controller from MaaSModelRef)
+oc get httproutes -n llm-inference
+# Expected: qwen25-7b-instruct-kserve-route
+
+# Auto-generated TokenRateLimitPolicy (created from MaaSSubscription.tokenRateLimits)
+oc get tokenratelimitpolicies -n llm-inference
+# Expected: maas-trlp-qwen25-7b-instruct
+
+# Auto-generated AuthPolicy (created from MaaSAuthPolicy)
+oc get authpolicies -n llm-inference
+# Expected: maas-auth-qwen25-7b-instruct
 ```
-End Users → External API GW (org policies) → MaaS Gateway (model governance) → Model Endpoints (GPU)
+
+```
+Integration pattern:
+  End Users → External API GW (org policies) → MaaS Gateway (model governance) → Model (GPU)
                                                     │
                                             ┌───────┴────────┐
                                             │ Per-team keys  │
@@ -213,42 +318,22 @@ End Users → External API GW (org policies) → MaaS Gateway (model governance)
                                             │ Rate limiting  │
                                             │ Usage tracking │
                                             └────────────────┘
-
-Under the hood (auto-generated by MaaS controller):
-  MaaSSubscription ──→ TokenRateLimitPolicy (kuadrant.io/v1alpha1)
-  MaaSAuthPolicy   ──→ AuthPolicy (kuadrant.io/v1beta2)
-  MaaSModelRef     ──→ HTTPRoute (gateway.networking.k8s.io/v1)
 ```
 
-```bash
-# The MaaS gateway endpoint is a single stable URL
-echo "MaaS Gateway endpoint: https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1"
-
-# Verify auto-generated Kuadrant policies (created by MaaS controller, not by us)
-oc get tokenratelimitpolicies -A
-# Expected: Auto-generated policies per subscription-model pair
-
-oc get authpolicies -A -l opendatahub.io/managed=true
-# Expected: Auto-generated auth policies for each model
-```
-
-**TELL**: The integration is a URL change in the external gateway's backend configuration. The MaaS gateway owns model-specific governance; the external gateway owns the external developer portal and organization-level policies. They are complementary layers.
+**TELL**: The integration is a URL change in the external gateway's backend configuration. MaaS owns model-specific governance; the external gateway owns organization-level policies. They are complementary layers. You never manually create HTTPRoutes, AuthPolicies, or TokenRateLimitPolicies — the MaaS controller generates them from your high-level CRDs.
 
 **Estimated time**: 4 minutes
 
 ---
 
-## 2. GOVERNANCE (Stage B)
+## 5. MULTI-TENANT SUBSCRIPTIONS (Stage B)
 
-### 2.1 Subscription Model — Three Teams, Three Tiers
+**TELL**: Today, all use cases typically share a single API key per model. This creates a security blast radius — if one key leaks, all access is compromised. MaaS introduces subscriptions: each team gets its own isolated access with independent quotas. A burst from one team cannot impact another.
 
-**TELL**: Today, all use cases typically share a single API key per model. This creates a security blast radius — if one key leaks, all access is compromised. It also makes it impossible to track who is consuming what or enforce per-team limits. MaaS introduces subscriptions: each team gets its own isolated access with independent quotas.
-
-> **Technical Detail — MaaSSubscription Spec (maas.opendatahub.io/v1alpha1)**:
->
-> - `spec.priority`: Higher number = higher priority (premium=10, basic=1). Determines the default subscription when a user with multiple group memberships generates an API key without specifying one.
-> - `spec.modelRefs[].tokenRateLimits`: REQUIRED (MinItems=1). Each entry has `limit` (1 to 1,000,000,000) and `window` (pattern: `^[1-9]\d{0,3}(s|m|h)$` — seconds, minutes, or hours only).
-> - `spec.owner`: At least one group or user required. Maps to OpenShift/OIDC group memberships.
+> **Key fields in `MaaSSubscription` (maas.opendatahub.io/v1alpha1)**:
+> - `spec.owner`: Groups/users who can generate API keys for this subscription
+> - `spec.modelRefs[].tokenRateLimits`: Token budget per model (REQUIRED). Format: `limit` (1–1B) + `window` (pattern: `^[1-9]\d{0,3}(s|m|h)$`)
+> - `spec.priority`: Determines which subscription is selected when a user belongs to multiple groups and generates a key without specifying one. Higher number = higher priority. Does NOT affect inference scheduling.
 > - `status.phase`: Active | Failed. Only Active subscriptions can generate API keys.
 
 **SHOW**:
@@ -272,311 +357,250 @@ oc get maassubscription team-c-app-developers -n models-as-a-service \
 # Expected: [{"limit": 50000, "window": "1h"}]
 ```
 
-**TELL**: Three teams, three tiers: premium (500K tokens/hr, priority 10), standard (100K tokens/hr, priority 5), basic (50K tokens/hr, priority 1). Each operates independently. A burst from the basic tier cannot impact the premium tier. Priority determines which subscription is selected as the default when a user belongs to multiple groups — it does not affect inference scheduling. This is all declarative — a YAML change, not an infrastructure project.
+**TELL**: Three teams, three tiers: premium (500K tokens/hr), standard (100K tokens/hr), basic (50K tokens/hr). Each operates independently with complete isolation. Priority (10/5/1) only affects default subscription selection during API key creation — it does NOT affect GPU scheduling or inference priority.
 
 **Estimated time**: 4 minutes
 
 ---
 
-### 2.2 API Key Creation and Scoped Access
+## 6. API KEY LIFECYCLE (Stage B)
 
-**TELL**: Each subscription can generate its own API keys. Keys use the `sk-oai-` prefix, are scoped to the models that subscription is bound to, and expire based on the organization's policy (max 90 days, set in the Tenant CR). Keys are hashed in PostgreSQL and validated per-request by Authorino. No shared secrets between teams.
+### 6.1 Key Creation and Scoped Access
 
-> **Technical Detail — API Key Properties**:
->
+**TELL**: Each subscription generates its own API keys. Keys use the `sk-oai-` prefix, are scoped to the models that subscription is bound to, and expire based on the organization's policy (max 90 days via Tenant CR). Keys are SHA-256 hashed in PostgreSQL and validated per-request by Authorino. No shared secrets between teams.
+
+> **API Key Properties**:
 > | Property | Value |
 > |----------|-------|
 > | Prefix | `sk-oai-` |
-> | Expiration | 1–365 days (admin-configurable max via `Tenant.spec.apiKeys.maxExpirationDays`, default 90) |
-> | Storage | SHA-256 hash in PostgreSQL (`maas-db-config` secret in `redhat-ods-applications`) |
-> | Group snapshot | Keys capture user's group memberships at creation time; later group changes don't affect existing keys |
-> | Scope | Bound to subscription's `modelRefs` — only works for those models |
+> | Expiration | 1–365 days (max set by `Tenant.spec.apiKeys.maxExpirationDays`, default 90) |
+> | Storage | SHA-256 hash in PostgreSQL (connection via `maas-db-config` secret in `redhat-ods-applications`) |
+> | Group snapshot | Captures user's group memberships at creation time |
+> | Scope | Bound to subscription's `modelRefs` — key only works for those models |
 > | Validation | Per-request by Authorino (no caching — revocation is instant) |
-> | Statuses | Active, Expired, Revoked |
 
 **SHOW**:
 ```bash
-# API keys are generated via the RHOAI dashboard or MaaS API
-# Navigate to: RHOAI Dashboard → Models → qwen25-7b-instruct → Subscriptions
-# Click on a subscription → Generate API Key
-# Key will have format: sk-oai-<random-alphanumeric>
+# API keys are generated via RHOAI Dashboard or MaaS API
+# Navigate to: RHOAI Dashboard → Models → qwen25-7b-instruct → Subscriptions → Generate Key
+# Key format: sk-oai-<random-alphanumeric>
 
-# Alternatively, temporary keys (1-hour TTL) from the Endpoints dialog:
-# RHOAI Dashboard → Models → Endpoints → Generate Temporary Key
+# MaaS API endpoint for programmatic key management:
+echo "MaaS API: https://$(oc get route maas-api-route -n redhat-ods-applications -o jsonpath='{.spec.host}' 2>/dev/null || echo 'internal-only')"
 
-# The MaaS API endpoint for key management:
-echo "MaaS API: https://$(oc get route maas-api -n redhat-ods-applications -o jsonpath='{.spec.host}')"
-
-# Test with a valid API key (replace with generated key)
-curl -sk "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
-  -H "Authorization: Bearer sk-oai-<YOUR_KEY>" \
+# Test with a valid API key
+curl -sk -w "\nHTTP %{http_code}\n" \
+  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
-# Expected: 200 OK with model response
+# Expected: HTTP 200 with model response
 
-# Test with invalid key — should be rejected
-curl -sk -w "\nHTTP %{http_code}\n" \
+# Test with invalid key — rejected immediately
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
   "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
   -H "Authorization: Bearer sk-oai-invalid-key-12345" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
-# Expected: HTTP 401 or 403
+# Expected: HTTP 403
 ```
 
-**TELL**: Keys are per-team, scoped to specific models, hashed at rest, and validated on every request. The `sk-oai-` prefix makes them recognizable in logs and compatible with OpenAI SDK credential patterns. If a key leaks, only that team's access is compromised — and it can be revoked instantly without affecting others.
+**TELL**: Keys are per-team, scoped to specific models, hashed at rest, and validated on every request. If a key leaks, only that team's access is compromised — revoke instantly without affecting others.
 
-**Estimated time**: 5 minutes
+**Estimated time**: 4 minutes
 
 ---
 
-### 2.3 Key Revocation — Immediate Effect
+### 6.2 Key Revocation — Immediate Effect
 
-**TELL**: When a key needs to be revoked — whether due to a leak, personnel change, or rotation policy — it must take effect immediately. Not after a cache flush, not after a TTL expires. Immediately. The next request with that key must fail. Revocation is permanent and cannot be undone.
+**TELL**: When a key needs to be revoked — due to a leak, personnel change, or rotation policy — it must take effect immediately. Not after a cache flush, not after a TTL expires. The very next request must fail.
 
 **SHOW**:
 ```bash
 # Step 1: Confirm the key works
-curl -sk -w "\nHTTP %{http_code}\n" \
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
   "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
-  -H "Authorization: Bearer sk-oai-<TEAM_A_KEY>" \
+  -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Test"}],"max_tokens":5}'
 # Expected: HTTP 200
 
-# Step 2: Revoke the key (via RHOAI Dashboard → Subscription → Revoke Key)
-# Note: Revocation is permanent — the key cannot be reactivated.
-# Admins can also revoke ALL keys for a specific user.
+# Step 2: Revoke the key
+# Via RHOAI Dashboard → Subscription → Keys → Revoke
+# Note: Revocation is PERMANENT — key cannot be reactivated
 
 # Step 3: Immediately retry the same key
-curl -sk -w "\nHTTP %{http_code}\n" \
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
   "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
-  -H "Authorization: Bearer sk-oai-<TEAM_A_KEY>" \
+  -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Test"}],"max_tokens":5}'
-# Expected: HTTP 401 — key rejected on the very next request
+# Expected: HTTP 401 or 403 — rejected on the very next request
 ```
 
-**TELL**: Revocation is instantaneous. Authorino validates against the database on each request — there is no cache window where a revoked key could still be used. This meets the requirement for zero-downtime security response.
+**TELL**: Revocation is instantaneous. Authorino validates against the database on each request — there is no cache window where a revoked key could still work.
 
 **Estimated time**: 3 minutes
 
 ---
 
-### 2.4 Token-Based Rate Limiting — Burst Triggers 429
+## 7. TOKEN-BASED RATE LIMITING (Stage B)
 
-**TELL**: Request-based rate limiting is a blunt instrument — it treats a 10-token request the same as a 10,000-token request. Token-based rate limiting is model-aware: it meters actual consumption. A team that sends a few large prompts will hit their limit just as fairly as a team sending many small ones.
+**TELL**: Request-based rate limiting treats a 10-token request the same as a 10,000-token request. Token-based rate limiting is model-aware: it meters actual consumption. A team sending a few large prompts hits their limit just as fairly as one sending many small requests.
 
-> **Technical Detail — How Token Metering Works**:
->
-> 1. MaaS controller reads `tokenRateLimits` from `MaaSSubscription` and auto-generates a `TokenRateLimitPolicy` (kuadrant.io/v1alpha1)
-> 2. Limitador intercepts inference responses and extracts `total_tokens` from the OpenAI-compatible `usage` field
-> 3. Token count is accumulated per-user within the subscription (counter keyed by `auth.identity.userid`)
-> 4. When the counter exceeds the limit within the window, Limitador returns HTTP 429
-> 5. Counter resets automatically when the window expires
->
-> Prometheus metrics emitted: `authorized_calls`, `limited_calls`, `limitador_counter_value`
+> **How Token Metering Works (under the hood)**:
+> 1. MaaS controller reads `tokenRateLimits` from your `MaaSSubscription`
+> 2. It auto-generates a `TokenRateLimitPolicy` in the model's namespace (`llm-inference`)
+> 3. Limitador intercepts inference responses and extracts `total_tokens` from the OpenAI-compatible `usage` field
+> 4. Token count accumulates per-user within the subscription window
+> 5. When the counter exceeds the limit, Limitador returns HTTP 429
+> 6. Counter resets automatically when the time window expires
 
 **SHOW**:
 ```bash
-# Current rate limits per tier
-echo "Premium (team-a): 500,000 tokens/hour (priority 10)"
-echo "Basic (team-c):    50,000 tokens/hour (priority 1)"
+# The auto-generated TokenRateLimitPolicy (in the MODEL's namespace, not models-as-a-service)
+oc get tokenratelimitpolicies -n llm-inference
+# Expected: maas-trlp-qwen25-7b-instruct
 
-# Burst test: send rapid requests to consume the basic tier's quota
+# View the policy details — shows per-subscription limits
+oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n llm-inference \
+  -o jsonpath='{.spec.limits}' | python3 -c "
+import json,sys
+limits = json.load(sys.stdin)
+for name, config in limits.items():
+    rate = config['rates'][0]
+    print(f'  {name}: {rate[\"limit\"]} tokens per {rate[\"window\"]}')
+"
+# Expected:
+#   ...-team-a-ml-engineering-...: 500000 tokens per 1h
+#   ...-team-b-data-science-...: 100000 tokens per 1h
+#   ...-team-c-app-developers-...: 50000 tokens per 1h
+
+# Burst test: rapid requests to consume the basic tier's quota
 for i in $(seq 1 20); do
   RESP=$(curl -sk -w "%{http_code}" -o /tmp/resp.json \
     "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
-    -H "Authorization: Bearer sk-oai-<TEAM_C_KEY>" \
+    -H "Authorization: Bearer ${TEAM_C_KEY}" \
     -H "Content-Type: application/json" \
-    -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Write a detailed essay about the history of artificial intelligence from its origins to present day, covering all major milestones."}],"max_tokens":2000}')
+    -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Write a detailed essay about artificial intelligence history covering all major milestones."}],"max_tokens":2000}')
   echo "Request $i: HTTP $RESP"
   [ "$RESP" = "429" ] && echo "  → Rate limit hit!" && break
 done
 # Expected: After consuming ~50K tokens, requests return HTTP 429
 
-# Verify premium tier is unaffected during basic tier's rate limiting
-curl -sk -w "\nHTTP %{http_code}\n" \
+# Verify premium tier is unaffected
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
   "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/chat/completions" \
-  -H "Authorization: Bearer sk-oai-<TEAM_A_KEY>" \
+  -H "Authorization: Bearer ${TEAM_A_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}'
 # Expected: HTTP 200 — premium tier completely unaffected
-
-# View the auto-generated TokenRateLimitPolicy
-oc get tokenratelimitpolicies -n models-as-a-service -o wide
-# Expected: One policy per subscription-model pair, each with the configured limits
 ```
 
-**TELL**: The basic tier was rate-limited at its configured threshold. Meanwhile, the premium tier continued serving normally. Limitador counted actual tokens consumed (from the model's `usage.total_tokens` response field), not just request count. This is the core value: noisy-neighbor protection at the token level.
+**TELL**: The basic tier was rate-limited at its configured threshold. Meanwhile, the premium tier continued serving normally. Limitador counted actual tokens consumed (from the model's `usage.total_tokens` response field), not just request count. This is noisy-neighbor protection at the token level.
 
 **Estimated time**: 5 minutes
 
 ---
 
-### 2.5 Tiered Access — Independent Enforcement
+## 8. OBSERVABILITY (Stage B)
 
-**TELL**: Different teams have different needs. A production ML pipeline needs guaranteed high throughput. An internal dev team doing experiments needs access but shouldn't monopolize the GPU. Tiers formalize this with independent quotas and priorities.
+**TELL**: Governance without observability is blind. Teams need to see their usage, admins need consumption visibility across the organization. RHOAI 3.4 provides per-subscription usage tracking through standard Prometheus metrics and a built-in Perses dashboard (Technology Preview) embedded in the OpenShift AI console.
 
-**SHOW**:
-```bash
-# Show all three tiers side by side
-oc get maassubscriptions -n models-as-a-service \
-  -o custom-columns='TEAM:.metadata.name,TIER:.metadata.labels.tier,TOKENS_HR:.spec.modelRefs[0].tokenRateLimits[0].limit,PRIORITY:.spec.priority'
-# Expected:
-# TEAM                      TIER      TOKENS_HR   PRIORITY
-# team-a-ml-engineering     premium   500000      10
-# team-b-data-science       standard  100000      5
-# team-c-app-developers     basic     50000       1
-
-# Priority determines default subscription selection during API key creation
-# Higher number = higher priority (used when a user belongs to multiple groups)
-```
-
-**TELL**: Three tiers, each with independent rate limits. Priority determines which subscription is selected as the default when a user belongs to multiple groups and generates an API key without specifying one. This is all configured declaratively — changing a tier is a YAML edit, not a re-architecture.
-
-**Estimated time**: 2 minutes
-
----
-
-### 2.6 Usage Tracking — Per-Subscription Metrics
-
-**TELL**: Governance without visibility is blind. Teams need to know their usage, and admins need to see consumption across the organization. RHOAI 3.4 provides per-subscription usage tracking queryable through Prometheus and visible in the admin dashboard.
-
-> **Technical Detail — Key Metrics**:
+> **Key Metrics** (all from Limitador, scraped via ServiceMonitor in `kuadrant-system`):
+> | Metric | Meaning |
+> |--------|---------|
+> | `authorized_hits` | Token count for authorized requests |
+> | `authorized_calls` | Request count that passed rate limiting |
+> | `limited_calls` | Request count rejected with HTTP 429 |
 >
-> | Metric | Source | Meaning |
-> |--------|--------|---------|
-> | `authorized_calls` | Limitador | Requests that passed rate limiting |
-> | `limited_calls` | Limitador | Requests rejected with 429 |
-> | `limitador_counter_value` | Limitador | Current token counter per subscription |
-> | `limitador_counter_max_value` | Limitador | Configured limit value |
-> | `auth_server_authconfig_total` | Authorino | Auth decisions (allow/deny) |
-> | `vllm:generation_tokens_total` | vLLM | Tokens generated by the model |
+> **Note**: The Perses dashboard is Technology Preview in RHOAI 3.4 — functional but not production-supported. May change in future releases.
 
 **SHOW**:
 ```bash
-# ServiceMonitors are scraping governance components
+# ServiceMonitors scraping governance components (in kuadrant-system namespace)
 oc get servicemonitors -n kuadrant-system
 # Expected: authorino-metrics, limitador-metrics
 
-# Query Prometheus for rate limit counters per subscription
-# (via OpenShift Console → Observe → Metrics)
-echo "PromQL: authorized_calls{namespace='models-as-a-service'}"
-echo "PromQL: limited_calls{namespace='models-as-a-service'}"
-echo "PromQL: limitador_counter_value / limitador_counter_max_value"
+# User workload monitoring is enabled (prerequisite for metrics collection)
+oc get configmap cluster-monitoring-config -n openshift-monitoring \
+  -o jsonpath='{.data.config\.yaml}'
+# Expected: enableUserWorkload: true
 
-# Query auth decisions
-echo "PromQL: rate(auth_server_authconfig_total[5m])"
+# PrometheusRule for automated alerting
+oc get prometheusrule -n kuadrant-system
+# Expected: ai-bridge-rate-limit-alerts
 
-# View the dashboard
-echo "OpenShift Console → Observe → Dashboards → AI Gateway - Multi-Tenant Inference"
+# Key PromQL queries (paste in OpenShift Console → Observe → Metrics):
+echo "=== Limitador Metrics ==="
+echo "1. Authorized tokens:  authorized_hits"
+echo "2. Authorized calls:   authorized_calls"
+echo "3. Rate-limited calls: limited_calls"
+echo ""
+echo "=== vLLM Inference Metrics ==="
+echo "4. Token throughput:     rate(vllm:generation_tokens_total[5m])"
+echo "5. Time to First Token:  histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))"
 ```
 
-Navigate to OpenShift Console → Observe → Dashboards and show:
-- Authorized calls by subscription
-- Token rate limit counters (current vs max)
-- vLLM throughput and TTFT
-- Auth allow/deny rates
+Navigate to: **OpenShift Console → Observe → Metrics** and query `authorized_calls` or `limited_calls` to see per-subscription data.
 
-**TELL**: Every request is metered. Admins see per-subscription token consumption in real time. This data feeds into chargeback models and capacity planning — no custom instrumentation required.
+**TELL**: Every request is metered. Admins see per-subscription token consumption in real time. The same metrics power the PrometheusRule alerts (rate limit approaching, rate limited, high auth denial rate). No custom instrumentation required — it's all auto-generated from the governance CRDs.
 
 **Estimated time**: 4 minutes
 
 ---
 
-## 3. ENTERPRISE INTEGRATION (Stage C)
+## 9. OIDC/SSO + RBAC (Stage C)
 
-### 3.1 OIDC/SSO Federation
+**TELL**: API keys work for programmatic access. But human operators — admins managing subscriptions, engineers browsing the model catalog — should authenticate through the enterprise identity provider. MaaS supports dual authentication: API keys for automation, OIDC/JWT for humans. The same identity that logs into internal tools is the identity that accesses models.
 
-**TELL**: API keys work for programmatic access. But human operators — admins managing subscriptions, engineers browsing the model catalog — should authenticate through the enterprise identity provider. The MaaS gateway federates with any OIDC-compliant IdP: the same SSO experience used for other internal tools.
-
-> **Technical Detail — Dual Authentication Model**:
->
-> MaaS supports two authentication methods simultaneously:
-> 1. **API Keys** (`sk-oai-*`): Validated by Authorino against PostgreSQL. Used for programmatic/automated access.
-> 2. **OIDC/JWT Tokens**: Validated against the configured IdP's JWKS endpoint. Used for interactive/human access.
->
-> The `Tenant` CR has an optional `spec.externalOIDC` section (Tech Preview) that configures OIDC at the MaaS level:
-> ```yaml
-> spec:
->   externalOIDC:
->     issuerUrl: "https://keycloak.example.com/realms/ai-bridge"
->     clientId: "maas-client"
->     ttl: 300  # JWKS cache duration
-> ```
->
-> Separately, the multi-cluster gateway path uses a manually deployed `AuthConfig` (authorino.kuadrant.io/v1beta3) for OIDC enforcement.
+> **Dual Authentication Model**:
+> 1. **API Keys** (`sk-oai-*`): Validated by Authorino against PostgreSQL. For programmatic/automated access.
+> 2. **OIDC/JWT Tokens**: Validated against the IdP's JWKS endpoint. For interactive/human access and dashboard login.
 
 **SHOW**:
 ```bash
-# AuthConfig validates JWTs from the enterprise IdP (multi-cluster path)
-oc get authconfig maas-gateway-oidc -n openshift-ingress \
-  -o jsonpath='{.spec.authentication.oidc-jwt.jwt.issuerUrl}'
-# Expected: https://<IDP_HOST>/realms/<realm>
+# Keycloak is the OIDC provider (realm: ai-bridge)
+KEYCLOAK_HOST="keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com"
+echo "OIDC Issuer: https://${KEYCLOAK_HOST}/realms/ai-bridge"
 
-# Get a token from the IdP (client credentials flow)
-TOKEN=$(curl -sk "https://${KEYCLOAK_HOST}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
-  -d "grant_type=client_credentials&client_id=${OIDC_CLIENT_ID}&client_secret=${OIDC_CLIENT_SECRET}" \
+# Get a token via client credentials flow
+TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/ai-bridge/protocol/openid-connect/token" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=ai-bridge-gateway" \
+  -d "client_secret=ai-bridge-secret-2026" \
   | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
 echo "Token obtained (${#TOKEN} chars)"
 
-# Access the gateway with OIDC token
-curl -sk -w "\nHTTP %{http_code}\n" \
-  "https://${MAAS_GW_HOST}/llm-inference/qwen25-7b-instruct/v1/models" \
-  -H "Authorization: Bearer $TOKEN"
-# Expected: HTTP 200 — OIDC auth accepted
+# Decode the JWT to show claims (add padding for base64url)
+echo "$TOKEN" | cut -d. -f2 | python3 -c "
+import sys,base64,json
+p=sys.stdin.read().strip()
+p+='='*(4-len(p)%4)
+d=json.loads(base64.urlsafe_b64decode(p))
+for k in ['iss','sub','azp','scope']:
+    if k in d: print(f'  {k}: {d[k]}')
+"
+# Shows: iss (Keycloak issuer), sub (service account ID), azp (client ID), scope
+
+# The RHOAI Dashboard also accepts OIDC login for admin operations
+# Navigate to: RHOAI Dashboard → Login → Select SSO provider
 ```
 
-**TELL**: The MaaS gateway validates tokens from the enterprise IdP on every request. This means the same identity that logs into internal tools is the identity that accesses models — unified audit trail, unified access policies.
+**TELL**: The MaaS gateway validates tokens from the enterprise IdP on every request. This means unified audit trail — the same identity that logs into internal tools is the identity that accesses models. Role assignments are managed in the IdP, not duplicated in the AI platform.
 
 **Estimated time**: 4 minutes
 
 ---
 
-### 3.2 Role-Based Access Control
-
-**TELL**: Not everyone should have the same permissions. An AI Engineer should be able to use models and view their own usage. An AI Admin should be able to create subscriptions, manage keys, and see all usage. RBAC is enforced at the gateway level based on JWT roles.
-
-> **Technical Detail — RHOAI Dashboard Feature Flags**:
->
-> Admin vs user capabilities are controlled in `OdhDashboardConfig`:
-> ```yaml
-> spec:
->   dashboardConfig:
->     modelAsService: true       # Admin: manage subscriptions, auth policies
->     genAiStudio: true          # User: models tab, API key generation
->     maasAuthPolicies: true     # Admin: auth policy management UI
->     observabilityDashboard: true  # Usage monitoring (Tech Preview)
-> ```
-
-**SHOW**:
-```bash
-# The AuthConfig enforces role-based access
-oc get authconfig maas-gateway-oidc -n openshift-ingress \
-  -o jsonpath='{.spec.authorization.role-check.patternMatching.patterns[0].predicate}'
-# Expected: auth.identity.realm_access.roles.exists(r, r == "ai-admin" || r == "ai-engineer")
-
-# Decode the JWT to show roles
-echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool | grep -A5 "realm_access"
-# Expected: "roles": ["ai-admin"] or ["ai-engineer"]
-
-# A token WITHOUT the required role would be rejected:
-# HTTP 403 — authenticated but not authorized
-```
-
-**TELL**: Authentication answers "who are you?" Authorization answers "what can you do?" The MaaS gateway enforces both. Role assignments are managed in the IdP, not duplicated in the AI platform.
-
-**Estimated time**: 3 minutes
-
----
-
-### 3.3 Secret Rotation — Vault + ESO, Zero Downtime
+## 10. SECRET ROTATION — Vault + ESO (Stage C)
 
 **TELL**: Credentials need to rotate. Database passwords expire, API keys get compromised, compliance requires periodic rotation. The platform integrates with HashiCorp Vault via the External Secrets Operator. Secrets rotate in Vault, and within 30 seconds, all consuming workloads have the new value — no pod restarts, no manual intervention.
 
-**SHOW**:
+**SHOW** (on gateway cluster):
 ```bash
-# SecretStore is validated (Vault connection healthy)
+# SecretStore is healthy (Vault connection validated)
 oc get secretstore vault-backend -n vault-dev -o jsonpath='{.status.conditions[0].message}'
 # Expected: store validated
 
@@ -609,55 +633,19 @@ echo "Secret rotation completed with zero downtime."
 
 ---
 
-### 3.4 Observability — Dashboards and Metrics
-
-**TELL**: Governance without observability is incomplete. Operators need to see: Who is using what? Are rate limits being hit? What is the inference latency? RHOAI 3.4 MaaS includes a built-in **Perses dashboard** embedded in the OpenShift AI console (Technology Preview). It visualizes token usage, rate limit status, and subscription activity out of the box. Additionally, standard Prometheus metrics are exposed for custom alerting.
-
-> **Note**: The MaaS observability dashboard is Perses-based and embedded in the OpenShift AI console. It is a **Technology Preview** feature in RHOAI 3.4 — not a separate Grafana deployment.
-
-**SHOW**:
-```bash
-# User workload monitoring is enabled (prerequisite)
-oc get configmap cluster-monitoring-config -n openshift-monitoring \
-  -o jsonpath='{.data.config\.yaml}'
-# Expected: enableUserWorkload: true
-
-# Verify Limitador metrics are being scraped
-oc get servicemonitor -n redhat-ods-applications | grep -i limitador
-
-# Key Limitador metrics (source of truth for rate limiting):
-echo "=== Key PromQL Queries (Limitador) ==="
-echo "1. Authorized tokens:    sum(authorized_hits{namespace='models-as-a-service'})"
-echo "2. Authorized calls:     sum(authorized_calls{namespace='models-as-a-service'})"
-echo "3. Rate-limited calls:   sum(limited_calls{namespace='models-as-a-service'})"
-echo ""
-echo "=== Inference Metrics (vLLM) ==="
-echo "4. Token throughput:     rate(vllm:generation_tokens_total[5m])"
-echo "5. Time to First Token:  histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))"
-echo "6. Error rate:           rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class=~'4|5'}[5m])"
-```
-
-Navigate to OpenShift AI Console → Models-as-a-Service → Usage Dashboard (Perses-based, Tech Preview).
-
-**TELL**: The built-in Perses dashboard shows token consumption per subscription, rate limit utilization, and 429 rejection rates. For custom alerting, the same Limitador metrics (`authorized_hits`, `authorized_calls`, `limited_calls`) are available via the Prometheus stack already deployed — no additional infrastructure needed.
-
-**Estimated time**: 4 minutes
-
----
-
-## 4. BONUS CAPABILITIES (Beyond PoC Scope)
+## 11. BONUS CAPABILITIES (Beyond PoC Scope)
 
 > **Note**: The following sections demonstrate additional capabilities that are NOT required for PoC success criteria validation. They are included as forward-looking differentiators.
 
-### 4.1 Guardrails — PII Regex Detection
+### 11.1 Guardrails — PII Regex Detection
 
-**TELL**: Content safety is a growing concern for model deployment. While full LLM-based content analysis is on the roadmap, the architecture for inline guardrails is available today. This demo shows a regex-based PII detector that inspects requests before they reach the model.
+**TELL**: Content safety is a growing concern. While full LLM-based content analysis is on the roadmap, the architecture for inline guardrails is available today. This shows a regex-based PII detector that inspects requests before they reach the model.
 
 **SHOW**:
 ```bash
-# Guardrails pod is running with two containers: gateway + orchestrator
+# Guardrails pod: gateway + orchestrator containers
 oc get pods -n ai-guardrails
-# Expected: guardrails-gateway 2/2 Running
+# Expected: guardrails-gateway-* 2/2 Running
 
 # Passthrough route (no filtering)
 curl -sk "http://${GUARDRAILS_HOST}/passthrough/v1/chat/completions" \
@@ -666,7 +654,7 @@ curl -sk "http://${GUARDRAILS_HOST}/passthrough/v1/chat/completions" \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['choices'][0]['message']['content'])"
 # Expected: Normal model response
 
-# PII detection route (scans for email, SSN, credit card patterns)
+# PII detection route
 curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"My SSN is 123-45-6789 and email is test@example.com"}],"max_tokens":50}' \
@@ -674,43 +662,49 @@ curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
 # Expected: Response with detections field populated (PII patterns found)
 ```
 
-**TELL**: The guardrails gateway inspects traffic inline without changing the model. Today it uses regex patterns; the same architecture supports LLM-based detectors (TrustyAI) as they mature. The pattern is proven — only the detector sophistication changes.
+**TELL**: The guardrails gateway inspects traffic inline without changing the model. Today it uses regex; the same architecture supports LLM-based detectors (TrustyAI) as they mature.
 
 **Estimated time**: 4 minutes
 
 ---
 
-### 4.2 Multi-Cluster Routing — Proof of Mechanism
+### 11.2 Multi-Cluster Routing — Proof of Mechanism
 
-**TELL**: This demonstrates the _mechanism_ of cross-cluster routing — not a production-ready multi-cluster topology. A dedicated gateway cluster (no GPUs) validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards authenticated requests to a separate inference cluster over TLS using a static Istio ServiceEntry.
+**TELL**: This demonstrates the _mechanism_ of cross-cluster routing — not a production topology. A dedicated gateway cluster (no GPUs) validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards authenticated requests to the inference cluster over TLS using a static Istio ServiceEntry.
 
-> **Technical reality**:
-> - Routing is configured via a hardcoded `ServiceEntry` (manual IP/hostname of inference cluster)
-> - No dynamic service discovery or fleet management (no RHACM, Submariner, or Skupper)
-> - MaaS governance (subscriptions, rate limits, Tenant) lives on the inference cluster, not the gateway
-> - Auth happens at two layers: OIDC at the gateway (Kuadrant AuthPolicy) AND API key auth at the inference cluster (Authorino/MaaS)
-> - This is a 1:1 gateway→inference mapping, not fan-out to multiple backends
->
-> **What needs customer input**: Final topology (active-active pool vs. dedicated ingress tier, governance placement, number of inference clusters behind the gateway) must be confirmed before production design.
+> **Technical reality (be honest with the customer)**:
+> - Routing is a hardcoded `ServiceEntry` (manual hostname of inference cluster)
+> - No dynamic service discovery or fleet management
+> - MaaS governance (subscriptions, rate limits) lives on the inference cluster, not this gateway
+> - Auth at the gateway (OIDC/JWT) is INDEPENDENT of MaaS auth (API keys) — two separate layers
+> - This is 1:1 gateway→inference, not fan-out to multiple backends
+> - Final topology design requires customer's actual target architecture
 
-**SHOW**:
+**SHOW** (on gateway cluster):
 ```bash
-# Gateway cluster components (no GPUs, routing only):
-# - Istio Gateway with external LoadBalancer
-# - Kuadrant AuthPolicy (JWT validation against Keycloak)
-# - ServiceEntry pointing to remote inference cluster (static config)
-# - DestinationRule for mTLS to remote backend
-# - EnvoyFilter for SSL context
+# Gateway cluster components:
+oc get gateway -n ai-gateway
+# Expected: ai-inference-gateway (Programmed=True, with ELB address)
 
-# Unauthenticated request → rejected at gateway (Kuadrant AuthPolicy)
-curl -s -w "HTTP %{http_code}\n" -o /dev/null \
+oc get authpolicy -n ai-gateway
+# Expected: ai-gateway-oidc-auth
+
+# Unauthenticated request → 401 (Kuadrant AuthPolicy rejects)
+AI_GW_HOST="a394f738adad5408e88b1cca557b6666-1772410415.us-east-2.elb.amazonaws.com"
+curl -s --max-time 10 -w "HTTP %{http_code}\n" -o /dev/null \
   "http://${AI_GW_HOST}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":5}'
 # Expected: HTTP 401
 
-# Authenticated request → gateway validates JWT → forwards to inference cluster
-curl -s "http://${AI_GW_HOST}/v1/chat/completions" \
+# Authenticated request → gateway validates JWT → routes to inference cluster
+KEYCLOAK_HOST="keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com"
+TOKEN=$(curl -sk -X POST \
+  "https://${KEYCLOAK_HOST}/realms/ai-bridge/protocol/openid-connect/token" \
+  -d "grant_type=client_credentials&client_id=ai-bridge-gateway&client_secret=ai-bridge-secret-2026" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+
+curl -s --max-time 15 "http://${AI_GW_HOST}/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":10}' \
@@ -718,34 +712,9 @@ curl -s "http://${AI_GW_HOST}/v1/chat/completions" \
 # Expected: Model response (traversed: client → ELB → Istio GW → ServiceEntry → inference cluster → vLLM)
 ```
 
-**TELL**: This proves the mechanism works — OIDC-authenticated cross-cluster routing via Istio. The gateway cluster has no GPUs (routing/auth only), the inference cluster has GPUs but no direct external exposure. However, this is a static 1:1 configuration, not a dynamically managed multi-cluster fleet. The production topology (how many clusters, where governance lives, active-active vs ingress-fan-out) is a design decision that depends on the customer's actual target architecture.
+**TELL**: This proves the mechanism: OIDC-authenticated cross-cluster routing via Istio. The gateway cluster has no GPUs (routing/auth only), the inference cluster has GPUs but no direct external exposure. The production topology — how many clusters, where governance lives, active-active vs ingress-fan-out — depends on the customer's target architecture and is a design exercise for the next phase.
 
 **Estimated time**: 3 minutes
-
----
-
-### 4.3 GitOps Deployment Model
-
-**TELL**: Everything demonstrated today is declarative and stored in Git. ArgoCD manages the deployment, Kustomize handles environment-specific values, and secrets are managed through Vault — never stored in the repository. This is the production-grade deployment pattern.
-
-**SHOW**:
-```bash
-# ArgoCD applications managing the stack
-oc get applications.argoproj.io -A | grep maas-demo
-# Expected: maas-demo-gateway (Synced/Healthy), maas-demo-inference (Synced/Healthy)
-
-# Repository structure
-echo "github.com/rrbanda/maas-demo"
-echo "├── manifests/          ← base resources (no secrets, no env-specific values)"
-echo "│   └── model/          ← Tenant, MaaSModelRef, MaaSSubscriptions, MaaSAuthPolicy"
-echo "├── profiles/           ← composition (single-cluster or multi-cluster)"
-echo "├── clusters/live/      ← environment overlays (Kustomize patches)"
-echo "└── scripts/            ← deploy, teardown, validate"
-```
-
-**TELL**: Infrastructure as code, secrets in Vault, deployment via ArgoCD. A new environment is a new overlay directory — no manual steps, fully auditable, reproducible.
-
-**Estimated time**: 2 minutes
 
 ---
 
@@ -753,12 +722,12 @@ echo "└── scripts/            ← deploy, teardown, validate"
 
 **TELL**: What we demonstrated today:
 
-1. **Foundation**: RHOAI 3.4 with MaaS enabled (5 CRDs, Tenant anchor, auto-generated gateway policies), model serving with OpenAI-compatible API (`sk-oai-` keys), seamless integration point for existing API management
-2. **Governance**: Per-team subscriptions with independent API keys, token-based rate limiting (Limitador counting `total_tokens` from response), three-tier priority model, real-time usage tracking
-3. **Enterprise Integration**: OIDC/SSO federation with role-based access, zero-downtime secret rotation via Vault, full observability through Prometheus and dashboards
+1. **Foundation**: GitOps-deployed, RHOAI 3.4 with MaaS enabled (5 CRDs, Tenant anchor, auto-generated gateway policies), OpenAI-compatible API
+2. **Governance**: Per-team subscriptions with independent API keys (`sk-oai-`), token-based rate limiting (Limitador counting `total_tokens`), instant revocation
+3. **Enterprise**: OIDC/SSO federation, zero-downtime secret rotation via Vault, per-subscription observability metrics
 
 All of this is:
-- **Declarative** — YAML CRDs, controller-reconciled (MaaS controller auto-generates Kuadrant policies)
+- **Declarative** — YAML CRDs, controller-reconciled
 - **GitOps-managed** — auditable, reproducible, rollback-capable
 - **API-compatible** — existing applications need only a base URL change
 - **Complementary** — works alongside existing API management infrastructure
@@ -767,27 +736,33 @@ All of this is:
 
 ## Fallback Commands
 
-If something fails during the live demo, use these to show pre-captured evidence:
+If something fails during the live demo:
 
 ```bash
-# If model isn't responding, show it from inside the cluster
-oc exec -n llm-inference deployment/llm-d-epp -- \
-  curl -sk --max-time 10 "https://qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000/v1/models"
+# If model isn't responding externally, test directly (vLLM uses TLS internally)
+oc port-forward -n llm-inference svc/qwen25-7b-instruct-kserve-workload-svc 8443:8000 &
+sleep 2
+curl -sk https://localhost:8443/v1/models
+kill %1
 
-# If MaaS gateway isn't accessible externally, test internally
-oc run test-gw --rm -i --restart=Never --image=curlimages/curl -n default -- \
-  curl -sk "https://maas-default-gateway-data-science-gateway-class.openshift-ingress.svc:443/llm-inference/qwen25-7b-instruct/v1/models"
+# If MaaS gateway isn't accessible, test via internal service
+oc port-forward -n openshift-ingress svc/maas-default-gateway-data-science-gateway-class 9443:443 &
+sleep 2
+curl -sk https://localhost:9443/llm-inference/qwen25-7b-instruct/v1/models \
+  -H "Authorization: Bearer ${API_KEY}"
+kill %1
 
 # If rate limiting hasn't triggered, show the auto-generated policy
-oc get tokenratelimitpolicies -n models-as-a-service -o yaml
+oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n llm-inference -o yaml
 
 # If subscriptions aren't Active, check Tenant status first
 oc get tenant default-tenant -n models-as-a-service -o yaml
 
 # If MaaSModelRef isn't Ready, check conditions
-oc get maasmodelref qwen25-7b-instruct -n llm-inference -o jsonpath='{.status.conditions}' | python3 -m json.tool
+oc get maasmodelref qwen25-7b-instruct -n llm-inference \
+  -o jsonpath='{.status.conditions}' | python3 -m json.tool
 
-# If Vault rotation is slow, show current ExternalSecret status
+# If Vault rotation is slow, check ExternalSecret status
 oc get externalsecrets -n vault-dev -o wide
 ```
 
@@ -797,27 +772,24 @@ oc get externalsecrets -n vault-dev -o wide
 
 | Section | Topic | Time |
 |---------|-------|------|
-| 1.1 | Platform Overview + Tenant | 3 min |
-| 1.2 | Model Serving + MaaSModelRef Status | 3 min |
-| 1.3 | API Compatibility | 5 min |
-| 1.4 | Architecture + Auto-Generated Policies | 4 min |
-| 2.1 | Subscription Model | 4 min |
-| 2.2 | API Key Creation (`sk-oai-`) | 5 min |
-| 2.3 | Key Revocation | 3 min |
-| 2.4 | Rate Limiting (TokenRateLimitPolicy) | 5 min |
-| 2.5 | Tiered Access | 2 min |
-| 2.6 | Usage Tracking | 4 min |
-| 3.1 | OIDC/SSO + Dual Auth | 4 min |
-| 3.2 | Role-Based Access | 3 min |
-| 3.3 | Secret Rotation | 5 min |
-| 3.4 | Observability | 4 min |
-| 4.1 | Guardrails (bonus) | 4 min |
-| 4.2 | Multi-cluster (bonus) | 3 min |
-| 4.3 | GitOps (bonus) | 2 min |
-| **Total** | | **~63 min** |
+| 1 | GitOps Foundation | 3 min |
+| 2.1 | Platform Overview + Tenant | 3 min |
+| 2.2 | Model Serving + MaaSModelRef | 3 min |
+| 3 | API Compatibility | 5 min |
+| 4 | Architecture Positioning | 4 min |
+| 5 | Multi-Tenant Subscriptions | 4 min |
+| 6.1 | API Key Creation | 4 min |
+| 6.2 | Key Revocation | 3 min |
+| 7 | Token Rate Limiting | 5 min |
+| 8 | Observability | 4 min |
+| 9 | OIDC/SSO + RBAC | 4 min |
+| 10 | Secret Rotation | 5 min |
+| 11.1 | Guardrails (bonus) | 4 min |
+| 11.2 | Multi-cluster (bonus) | 3 min |
+| **Total** | | **~54 min** |
 
-**For a 45-minute slot**: Skip sections 4.1–4.3 (bonus) and condense 2.5 into 2.1.
-**For a 30-minute slot**: Cover 1.1, 1.3, 2.1, 2.2, 2.4, 3.1, 3.3 only (core value props).
+**For a 45-minute slot**: Skip sections 11.1–11.2 (bonus) and condense section 4 into section 2.
+**For a 30-minute slot**: Cover 1, 2, 3, 5, 6.1, 7, 8 only (core value props).
 
 ---
 
@@ -826,10 +798,10 @@ oc get externalsecrets -n vault-dev -o wide
 | Requirement | Detail |
 |-------------|--------|
 | OpenShift | 4.19.9+ |
-| RHOAI Operator | 3.4+ |
+| RHOAI Operator | 3.4+ (channel: `stable-3.4`) |
 | Red Hat Connectivity Link (RHCL) | 1.2+ (provides Kuadrant/Authorino/Limitador) |
 | `Kuadrant` CR | In `kuadrant-system` with Ready status |
-| `GatewayClass` | `openshift.io/gateway-controller` |
+| `GatewayClass` | `data-science-gateway-class` (created by RHOAI) |
 | User Workload Monitoring | Enabled in `cluster-monitoring-config` |
-| PostgreSQL | For API key hash storage |
-| NVIDIA GPU Operator | 25.x (for GPU nodes) |
+| PostgreSQL | For API key hash storage (`maas-db-config` secret in `redhat-ods-applications`) |
+| NVIDIA GPU Operator | For GPU nodes |
