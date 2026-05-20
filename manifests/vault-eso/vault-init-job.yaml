@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-init
+  namespace: vault-dev
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: vault-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: vault-init
+          image: docker.io/hashicorp/vault:1.17
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until vault status > /dev/null 2>&1; do
+                echo "Waiting for Vault..."
+                sleep 2
+              done
+              vault kv put secret/ai-bridge/api-keys \
+                team-a-key="REPLACE_WITH_TEAM_A_KEY" \
+                team-b-key="REPLACE_WITH_TEAM_B_KEY"
+              vault kv put secret/ai-bridge/db-credentials \
+                postgres-password="REPLACE_WITH_POSTGRES_PASSWORD" \
+                postgres-url="REPLACE_WITH_DATABASE_URL"
+          env:
+            - name: VAULT_ADDR
+              value: "http://vault.vault-dev.svc:8200"
+            - name: VAULT_TOKEN
+              value: "REPLACE_WITH_VAULT_TOKEN"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop: ["ALL"]
