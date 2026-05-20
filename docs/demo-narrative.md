@@ -18,13 +18,16 @@
 > | 7. Observability | Stage B | SC-B4: Usage visibility via metrics |
 > | 8. OIDC/SSO + RBAC | Stage C | SC-C1: Enterprise identity federation |
 > | 9. Secret Rotation | Stage C | SC-C2: Zero-downtime credential rotation |
+> | 11. ExternalModel (AI Bridge) | Stage C+ | SC-C3: Centralized governance over remote/external models |
 > | Bonus: Guardrails | Beyond Scope | Not required for PoC success |
-> | Bonus: Multi-cluster Routing | Beyond Scope | Proof-of-mechanism only |
+> | Bonus: Multi-cluster Legacy | Beyond Scope | Superseded by Section 11 |
 >
-> **Deployment Profile**: Multi-cluster (gateway cluster + inference cluster).
-> - **What this demonstrates**: The _mechanism_ of OIDC-authenticated cross-cluster routing via Istio. A dedicated ingress cluster validates JWT tokens and forwards to a remote inference cluster over TLS.
-> - **What this is NOT**: A production-ready multi-cluster topology. Routing is static (hardcoded ServiceEntry), no fleet discovery (no RHACM/Submariner/Skupper), and governance lives on the inference cluster.
-> - **Customer note**: Final topology requires confirmation of target architecture before production design.
+> **Deployment Profile**: Multi-cluster (AI Bridge + inference worker).
+> - **Cluster 1 (AI Bridge)**: RHOAI 3.4 with MaaS governance. No GPUs. Runs Tenant, Subscriptions, AuthPolicy, ExternalModel CRs. All consumer traffic enters here.
+> - **Cluster 2 (Inference Worker)**: GPU cluster running vLLM (Qwen2.5-7B). Exposed via OpenShift Route. No direct consumer access — all traffic routed through the AI Bridge.
+> - **External Provider**: Google Gemini 2.0 Flash, accessed via ExternalModel CR with server-side credential injection.
+> - **What this demonstrates**: Centralized MaaS governance (auth, rate limiting, usage tracking) over heterogeneous backends — local, cross-cluster, and external cloud APIs — through a single gateway URL.
+> - **Customer note**: Adding backends (new clusters, new providers) is an additive operation — one `ExternalModel` CR + one Secret. Zero consumer-side changes.
 
 ---
 
@@ -644,11 +647,130 @@ echo "Secret rotation completed with zero downtime."
 
 ---
 
-## 11. BONUS CAPABILITIES (Beyond PoC Scope)
+## 11. EXTERNAL MODELS — AI Bridge as Centralized Gateway (Stage C+)
+
+**TELL**: So far we've shown governance over a model running locally on this cluster. But the AI Bridge can also govern models running *anywhere* — on other clusters, or from external providers like Google Gemini, Azure OpenAI, or AWS Bedrock. The `ExternalModel` CR (Technology Preview in 3.4, GA in 3.5) lets you register any OpenAI-compatible endpoint as a governed model. The consumer experience is identical: same MaaS gateway URL, same API keys, same rate limiting. They never know if the model is local, cross-cluster, or a third-party API.
+
+> **ExternalModel CR fields** (`maas.opendatahub.io/v1alpha1`):
+> | Field | Purpose |
+> |-------|---------|
+> | `spec.provider` | Provider type (e.g., `openai`) — determines API translation behavior |
+> | `spec.endpoint` | Backend hostname (no scheme) — where traffic is forwarded |
+> | `spec.targetModel` | Model name sent to the backend (may differ from MaaS model name) |
+> | `spec.credentialRef.name` | Secret containing the provider API key (injected server-side) |
+>
+> **Critical detail**: The Secret referenced by `credentialRef` MUST have the label `inference.networking.k8s.io/bbr-managed: "true"` or the credential injection plugin will not find it.
+
+**SHOW**:
+```bash
+# Two ExternalModels configured on the AI Bridge (Cluster 1):
+oc get externalmodel -n models-as-a-service \
+  -o custom-columns='NAME:.metadata.name,PROVIDER:.spec.provider,TARGET:.spec.targetModel,ENDPOINT:.spec.endpoint'
+# Expected:
+# NAME                 PROVIDER   TARGET               ENDPOINT
+# gemini-2-0-flash     openai     gemini-2.0-flash     generativelanguage.googleapis.com
+# qwen25-7b-instruct   openai     qwen25-7b-instruct   <cluster-2-inference-hostname>
+
+# Both are registered as MaaSModelRefs and Ready
+oc get maasmodelref -n models-as-a-service \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,GATEWAY:.status.gatewayRef'
+# Expected: gemini-2-0-flash (Ready), qwen25-7b-instruct (Ready)
+
+# Credentials are managed via Vault + ESO (never in Git)
+oc get externalsecrets -n models-as-a-service
+# Expected: gemini-credentials (SecretSynced), vllm-cluster2-credentials (SecretSynced)
+
+# Verify the required label on synced secrets
+oc get secret gemini-credentials -n models-as-a-service \
+  -o jsonpath='{.metadata.labels.inference\.networking\.k8s\.io/bbr-managed}'
+# Expected: true
+```
+
+### 11.1 Test: Cross-Cluster Inference (vLLM on Cluster 2)
+
+**TELL**: This call goes through the AI Bridge on Cluster 1, which injects the bearer token and routes to Cluster 2's vLLM — a completely different OpenShift cluster. The consumer doesn't know the model is remote.
+
+**SHOW**:
+```bash
+# Call the remote vLLM model through the AI Bridge gateway
+curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen25-7b-instruct",
+    "messages": [{"role": "user", "content": "What is Kubernetes in one sentence?"}],
+    "max_tokens": 50
+  }' | python3 -m json.tool
+# Expected: Standard OpenAI chat completion response
+# The request traversed: Client → AI Bridge (Cluster 1) → credential injection → Cluster 2 vLLM
+
+# Verify the same rate limiting applies
+# (ExternalModels are bound to the same MaaSSubscriptions as local models)
+oc get tokenratelimitpolicies -n models-as-a-service --no-headers
+```
+
+### 11.2 Test: External Provider (Google Gemini)
+
+**TELL**: Same pattern, different backend. This call goes to Google's Gemini API. The AI Bridge injects the Gemini API key server-side — the consumer never sees or handles provider credentials. Governance (auth, rate limits, usage tracking) applies identically.
+
+**SHOW**:
+```bash
+# Call Gemini through the AI Bridge — identical consumer experience
+curl -sk "https://${MAAS_GW_HOST}/models-as-a-service/gemini-2-0-flash/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2-0-flash",
+    "messages": [{"role": "user", "content": "Explain rate limiting in 2 sentences."}],
+    "max_tokens": 100
+  }' | python3 -m json.tool
+# Expected: Gemini response in OpenAI format
+# The request traversed: Client → AI Bridge → path rewrite → credential injection → Google API
+
+# The consumer used the SAME API key, SAME gateway, SAME format
+# They don't know (or care) that this model is Gemini vs local vLLM
+```
+
+### 11.3 Architecture: What This Proves
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        AI BRIDGE (Cluster 1)                                 │
+│              MaaS Governance — No GPUs, No Models Running                    │
+│                                                                             │
+│  ┌───────────────┐     ┌──────────────┐     ┌────────────────────┐         │
+│  │ MaaS Gateway  │────▶│  Authorino   │────▶│  Limitador         │         │
+│  │ (Envoy + ELB) │     │  (API keys)  │     │  (token counting)  │         │
+│  └───────┬───────┘     └──────────────┘     └────────────────────┘         │
+│          │                                                                   │
+│          ├── ExternalModel: qwen25-7b-instruct ──▶ Cluster 2 (vLLM + GPU)  │
+│          │      credentialRef → vllm-cluster2-credentials (from Vault)       │
+│          │                                                                   │
+│          ├── ExternalModel: gemini-2-0-flash ────▶ Google Gemini API        │
+│          │      credentialRef → gemini-credentials (from Vault)              │
+│          │                                                                   │
+│          └── (future) ExternalModel: llama-3-70b ─▶ Cluster 3 (Worker 2)   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Key points:
+• Single MaaS gateway = single URL for consumers
+• Provider credentials injected server-side (consumers never see them)
+• Same subscriptions, same rate limits, same API keys — regardless of backend
+• Adding a new backend = one ExternalModel CR + one Secret (zero consumer changes)
+```
+
+**TELL**: This is the AI Bridge vision: centralized model governance across any backend. Local models, remote clusters, cloud providers — all unified under one gateway with consistent authentication, rate limiting, and usage tracking. Adding a new model backend is a single CR + secret. Consumers get one stable URL and one API key that works across everything.
+
+**Estimated time**: 8 minutes
+
+---
+
+## 12. BONUS CAPABILITIES (Beyond PoC Scope)
 
 > **Note**: The following sections demonstrate additional capabilities that are NOT required for PoC success criteria validation. They are included as forward-looking differentiators.
 
-### 11.1 Guardrails — PII Regex Detection
+### 12.1 Guardrails — PII Regex Detection
 
 **TELL**: Content safety is a growing concern. While full LLM-based content analysis is on the roadmap, the architecture for inline guardrails is available today. This shows a regex-based PII detector that inspects requests before they reach the model.
 
@@ -679,7 +801,7 @@ curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
 
 ---
 
-### 11.2 Multi-Cluster Routing — Proof of Mechanism
+### 12.2 Multi-Cluster Routing — Legacy Istio Approach (Superseded by Section 11)
 
 **TELL**: This demonstrates the _mechanism_ of cross-cluster routing — not a production topology. A dedicated gateway cluster (no GPUs) validates OIDC tokens via Istio + Kuadrant AuthPolicy, then forwards authenticated requests to the inference cluster over TLS using a static Istio ServiceEntry.
 
@@ -795,12 +917,14 @@ oc get externalsecrets -n vault-dev -o wide
 | 8 | Observability | 4 min |
 | 9 | OIDC/SSO + RBAC | 4 min |
 | 10 | Secret Rotation | 5 min |
-| 11.1 | Guardrails (bonus) | 4 min |
-| 11.2 | Multi-cluster (bonus) | 3 min |
-| **Total** | | **~54 min** |
+| 11 | ExternalModel — AI Bridge Gateway | 8 min |
+| 12.1 | Guardrails (bonus) | 4 min |
+| 12.2 | Multi-cluster legacy (bonus) | 3 min |
+| **Total** | | **~62 min** |
 
-**For a 45-minute slot**: Skip sections 11.1–11.2 (bonus) and condense section 4 into section 2.
-**For a 30-minute slot**: Cover 1, 2, 3, 5, 6.1, 7, 8 only (core value props).
+**For a 60-minute slot**: Skip sections 12.1–12.2 (bonus).
+**For a 45-minute slot**: Skip 12.1–12.2, condense section 4 into section 2, abbreviate section 11 (show one ExternalModel call only).
+**For a 30-minute slot**: Cover 1, 2, 3, 5, 6.1, 7, 11.2 (Gemini call) only — shows core governance + external model story.
 
 ---
 
