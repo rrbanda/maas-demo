@@ -63,6 +63,22 @@ itself and do not need a separate Kubernetes secret.
 |------------|-----------|---------|
 | `secret/ai-bridge/api-keys` | `team-a-key`, `team-b-key` | ExternalSecret `ai-bridge-api-keys` |
 | `secret/ai-bridge/db-credentials` | `postgres-password`, `postgres-url` | ExternalSecret `maas-db-config` |
+| `secret/gemini-credentials` | `api-key` | ExternalSecret `gemini-credentials` |
+| `secret/vllm-cluster2-credentials` | `api-key` | ExternalSecret `vllm-cluster2-credentials` |
+
+## ExternalModel Provider Credentials
+
+Provider credential Secrets (referenced by `ExternalModel.spec.credentialRef`) have a
+**critical undocumented requirement**: the Secret MUST carry the label
+`inference.networking.k8s.io/bbr-managed: "true"`. Without this label, the
+payload-processing `apikey-injection` plugin will not load the credentials into its
+in-memory store, and inference calls will fail with "credentials not found".
+
+The ExternalSecret templates in `manifests/external-models/external-secrets.yaml`
+use `target.template.metadata.labels` to ensure the label is applied automatically
+when ESO syncs from Vault.
+
+The Secret data key must be exactly `api-key` (not `apiKey`, not `api_key`).
 
 ## For Production
 

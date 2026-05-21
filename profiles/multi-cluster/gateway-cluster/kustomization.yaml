@@ -1,5 +1,5 @@
 # Multi-cluster profile: gateway cluster (CPU).
-# Deploys the AI Gateway, Vault, and ESO components.
+# Deploys the AI Gateway, Vault, ESO, and ExternalModel components.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -11,3 +11,5 @@ resources:
   - ../../../manifests/platform/authorino-tls
   # Vault + ESO
   - ../../../manifests/vault-eso
+  # ExternalModel CRs + provider credentials + Gemini path rewrite
+  - ../../../manifests/external-models

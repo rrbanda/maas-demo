@@ -1,0 +1,40 @@
+# Gemini's OpenAI-compatible API requires the path prefix /v1beta/openai/
+# instead of /v1/ that the api-translation plugin generates for the "openai" provider.
+# This EnvoyFilter rewrites the path after ext_proc processing.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: gemini-path-rewrite
+  namespace: openshift-ingress
+spec:
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: maas-default-gateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua.gemini-path-rewrite
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            default_source_code:
+              inline_string: |
+                function envoy_on_request(request_handle)
+                  local model_header = request_handle:headers():get("x-gateway-model-name")
+                  if model_header == "gemini-2.0-flash" then
+                    local path = request_handle:headers():get(":path")
+                    if path and path:find("^/v1/") then
+                      local new_path = path:gsub("^/v1/", "/v1beta/openai/")
+                      request_handle:headers():replace(":path", new_path)
+                    end
+                  end
+                end

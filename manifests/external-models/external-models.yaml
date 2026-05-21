@@ -1,0 +1,23 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gemini-2-0-flash
+  namespace: models-as-a-service
+spec:
+  provider: openai
+  endpoint: generativelanguage.googleapis.com
+  targetModel: gemini-2.0-flash
+  credentialRef:
+    name: gemini-credentials
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: qwen25-7b-instruct
+  namespace: models-as-a-service
+spec:
+  provider: openai
+  endpoint: REPLACE_WITH_INFERENCE_CLUSTER_HOSTNAME
+  targetModel: qwen25-7b-instruct
+  credentialRef:
+    name: vllm-cluster2-credentials

@@ -6,6 +6,262 @@
 > **Target duration**: 45–60 minutes for full walkthrough.
 > **Prerequisites**: Cluster deployed via ArgoCD from `github.com/rrbanda/maas-demo`, `config.env` populated.
 
+---
+
+## Quick-Start Runbook (Follow-Along)
+
+This section provides the exact URLs, credentials, and commands to execute the demo. Open these browser tabs before starting.
+
+### Browser Tabs to Pre-Open
+
+| Tab | URL | Login |
+|-----|-----|-------|
+| **ArgoCD** | `https://openshift-gitops-server-openshift-gitops.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | admin / `CMXginUm5TxZwzLp0qe31IJWdVEtho6r` |
+| **RHOAI Dashboard** | `https://rhods-dashboard-redhat-ods-applications.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | OpenShift SSO (admin / MzA0NjE1NjM2) |
+| **OpenShift Console** | `https://console-openshift-console.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | htpasswd: admin / MzA0NjE1NjM2 |
+| **Keycloak** | `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | admin console |
+| **GitHub Repo** | `https://github.com/rrbanda/maas-demo` | Public (no login) |
+
+### Terminal Setup
+
+```bash
+# Login to Cluster 1 (AI Bridge)
+oc login https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443 \
+  --username=admin --password=MzA0NjE1NjM2 --insecure-skip-tls-verify
+
+# Environment variables
+export MAAS_GW="ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com"
+
+# Generate an API key (use RHOAI Dashboard UI, or via CLI below):
+# RHOAI Dashboard → Models as a Service → select subscription → Generate API Key
+# For CLI fallback, port-forward to maas-api:
+#   oc port-forward svc/maas-api -n redhat-ods-applications 9443:8443
+#   curl -sk -X POST "https://localhost:9443/v1/api-keys" \
+#     -H "Authorization: Bearer $(oc whoami -t)" \
+#     -H "X-MaaS-Username: admin" \
+#     -H 'X-MaaS-Group: ["system:cluster-admins","system:authenticated:oauth","system:authenticated"]' \
+#     -H "Content-Type: application/json" \
+#     -d '{"subscription":"team-a-premium","name":"demo-key"}'
+
+export API_KEY="<paste-key-here>"
+```
+
+### Demo Flow (8 Acts, ~30 min condensed)
+
+---
+
+#### Act 1: GitOps — "Everything from Git" (3 min)
+
+**UI (ArgoCD tab):**
+- Show the Applications list — 28 apps synced
+- Click `maas-demo-gateway` → show it sources from `github.com/rrbanda/maas-demo` (path: `clusters/live/gateway`, branch: `main`)
+- Point out: operators, instances, models all managed by ApplicationSets
+
+**UI (GitHub tab):**
+- Show repo structure: `clusters/live/`, `manifests/`, `profiles/`, `scripts/`
+
+**CLI:**
+```bash
+oc get application.argoproj.io -n openshift-gitops --no-headers | wc -l
+# → 28 applications
+
+oc get application.argoproj.io maas-demo-gateway -n openshift-gitops \
+  -o jsonpath='Repo: {.spec.source.repoURL}{"\n"}Path: {.spec.source.path}{"\n"}Rev:  {.spec.source.targetRevision}{"\n"}'
+# → Repo: https://github.com/rrbanda/maas-demo.git
+#   Path: clusters/live/gateway
+#   Rev:  main
+```
+
+**Say:** "A git push IS the deployment. Full audit trail, instant rollback."
+
+---
+
+#### Act 2: Platform + Model (3 min)
+
+**UI (OpenShift Console):**
+- Navigate: Operators → Installed Operators → show RHOAI 3.4, RHCL, ESO
+- Navigate: Search → `Tenant` → show `default-tenant` (Ready)
+
+**CLI:**
+```bash
+# MaaS enabled
+oc get datasciencecluster default-dsc \
+  -o jsonpath='{.spec.components.kserve.modelsAsService.managementState}'
+# → Managed
+
+# Tenant active
+oc get tenant default-tenant -n models-as-a-service
+# → Ready
+
+# Model on Cluster 2 (switch context or just mention)
+# Pod: qwen25-7b-instruct-kserve-* Running on GPU cluster
+```
+
+**Say:** "One config change enables MaaS. The Tenant anchors everything — gateway binding, key policy."
+
+---
+
+#### Act 3: Auth Enforcement — Live (4 min)
+
+**CLI (the money shot — do this live):**
+```bash
+# No auth → 401
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"hi"}]}'
+
+# Bad key → 403
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer sk-oai-FAKE-KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"hi"}]}'
+
+# Valid key → 200 (cross-cluster inference!)
+curl -sk "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"What is OpenShift? One sentence."}],"max_tokens":50}' \
+  | python3 -m json.tool
+```
+
+**Say:** "Every request is validated. Same URL pattern as OpenAI — change `base_url` only."
+
+---
+
+#### Act 4: Multi-Tenant Subscriptions + Rate Limits (4 min)
+
+**UI (OpenShift Console):**
+- Search → `MaaSSubscription` → show 7 subscriptions with different priorities
+- Search → `TokenRateLimitPolicy` → show auto-generated policies
+
+**CLI:**
+```bash
+# Tiered subscriptions
+oc get maassubscriptions -n models-as-a-service \
+  -o custom-columns="NAME:.metadata.name,PHASE:.status.phase,PRIORITY:.spec.priority"
+
+# Rate limit tiers (auto-generated from subscriptions)
+oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service \
+  -o yaml | grep -E "limit:|window:" | head -6
+# → team-a-premium: 100,000 tokens/min
+# → team-b-standard: 20,000 tokens/min
+# → team-c-basic: 5,000 tokens/min
+```
+
+**Say:** "Each team gets independent token budgets. Burst from one cannot degrade another."
+
+---
+
+#### Act 5: ExternalModel — Multi-Provider (5 min)
+
+**UI (OpenShift Console):**
+- Search → `ExternalModel` → show 2 CRs:
+  - `qwen25-7b-instruct` → Cluster 2 vLLM
+  - `gemini-2-0-flash` → Google Gemini API
+
+**CLI:**
+```bash
+# Cross-cluster vLLM
+curl -sk "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+  -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"What is Kubernetes?"}],"max_tokens":50}' \
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(f'Model: {d[\"model\"]}\nResponse: {d[\"choices\"][0][\"message\"][\"content\"]}')"
+
+# Gemini via same gateway
+curl -sk "https://${MAAS_GW}/models-as-a-service/gemini-2-0-flash/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+  -d '{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"What is Red Hat OpenShift AI?"}],"max_tokens":50}' \
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(f'Model: {d[\"model\"]}\nResponse: {d[\"choices\"][0][\"message\"][\"content\"]}')"
+```
+
+**Say:** "Same API key, same URL pattern. Consumer doesn't know if it's your GPU cluster or Google's API. Credentials injected server-side from Vault."
+
+---
+
+#### Act 6: Enterprise Secrets (3 min)
+
+**UI (OpenShift Console):**
+- Search → `ExternalSecret` → show 2 secrets synced from Vault (Status: SecretSynced)
+- Search → `SecretStore` → show vault-backend (Valid)
+
+**CLI:**
+```bash
+# Secrets synced from Vault with auto-rotation
+oc get externalsecrets -n models-as-a-service
+# → gemini-credentials (SecretSynced, 1h refresh)
+# → vllm-cluster2-credentials (SecretSynced, 1h refresh)
+
+# Critical label for credential injection
+oc get secret gemini-credentials -n models-as-a-service \
+  -o jsonpath='{.metadata.labels.inference\.networking\.k8s\.io/bbr-managed}'
+# → true
+```
+
+**Say:** "Credentials rotate in Vault, sync to K8s automatically. Never in Git, never manual."
+
+---
+
+#### Act 7: Identity Federation (3 min)
+
+**CLI:**
+```bash
+# Get OIDC token from Keycloak
+KC_HOST="keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com"
+TOKEN=$(curl -sk "https://${KC_HOST}/realms/ai-bridge/protocol/openid-connect/token" \
+  -d "grant_type=client_credentials&client_id=ai-bridge-gateway&client_secret=ai-bridge-secret-2026" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+echo "Token: ${TOKEN:0:30}... (${#TOKEN} chars)"
+```
+
+**Say:** "Dual auth — API keys for automation, OIDC/SSO for humans. Same gateway, same governance."
+
+---
+
+#### Act 8: Closing Summary (2 min)
+
+Show architecture diagram (slide or whiteboard):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Cluster 1 — AI Bridge (No GPUs)                     │
+│                                                                  │
+│  Consumer → MaaS Gateway → Authorino → Limitador → ExternalModel│
+│                                              │           │       │
+│                                              ▼           ▼       │
+│                                         Cluster 2    Google      │
+│                                         (vLLM+GPU)   Gemini      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key points:**
+1. GitOps-managed (28 ArgoCD apps from 2 repos)
+2. Zero-trust auth on every request
+3. Multi-cluster + multi-provider via ExternalModel
+4. Token-based rate limiting per team
+5. Vault-synced secrets with auto-rotation
+6. OpenAI-compatible — change `base_url` only
+7. Self-service via RHOAI Dashboard
+
+---
+
+### Verified Environment Details
+
+| Resource | Value |
+|----------|-------|
+| Cluster 1 (AI Bridge) API | `https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443` |
+| Cluster 2 (Inference) API | `https://api.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com:6443` |
+| MaaS Gateway (ELB) | `ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com` |
+| vLLM Model Route | `qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com` |
+| Keycloak OIDC Issuer | `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge` |
+| Vault (internal) | `http://vault.vault-dev.svc:8200` |
+| ArgoCD Apps | 28 (from `maas-demo` + `rhoai-deploy-gitops` repos) |
+| Subscriptions | 7 (admin + 3 teams x 2 tiers) |
+| ExternalModels | 2 (qwen25-7b-instruct → Cluster 2, gemini-2-0-flash → Google) |
+
+---
+
 > **PoC Success Criteria Mapping**:
 > | Demo Section | PoC Stage | Success Criteria |
 > |---|---|---|
