@@ -1,16 +1,16 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: authorino-metrics
-  namespace: kuadrant-system
+  name: kserve-vllm-metrics
+  namespace: models-as-a-service
   labels:
-    app: authorino
     app.kubernetes.io/part-of: ai-bridge-observability
     monitoring.opendatahub.io/scrape: "true"
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: authorino
+      kserve.io/component: workload
   endpoints:
-    - port: metrics
-      interval: 15s
+    - port: h2c
+      path: /metrics
+      interval: 30s

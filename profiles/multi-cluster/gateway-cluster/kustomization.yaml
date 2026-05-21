@@ -13,3 +13,11 @@ resources:
   - ../../../manifests/vault-eso
   # ExternalModel CRs + provider credentials + Gemini path rewrite
   - ../../../manifests/external-models
+  # Observability: Perses deployment, SA, datasource, dashboards
+  - ../../../manifests/observability
+  # Kueue LocalQueue — enables Workload metrics page in RHOAI Dashboard
+  - ../../../manifests/platform/kueue
+  # DSCI patch — adds required storage config for RHOAI monitoring stack
+  - ../../../manifests/platform/dsci-patch
+  # ServiceMonitors + MonitoringStack patch
+  - ../../../manifests/platform/observability

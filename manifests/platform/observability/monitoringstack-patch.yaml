@@ -1,0 +1,12 @@
+# Ensures the RHOAI-managed Prometheus scrapes ServiceMonitors from all namespaces
+# and selects all SMs (not just those with a specific label).
+# resourceSelector: {} = match all labels
+# namespaceSelector: {} = all namespaces
+apiVersion: monitoring.rhobs/v1alpha1
+kind: MonitoringStack
+metadata:
+  name: data-science-monitoringstack
+  namespace: redhat-ods-monitoring
+spec:
+  resourceSelector: {}
+  namespaceSelector: {}

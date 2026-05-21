@@ -1,0 +1,10 @@
+# LocalQueue enables Workload metrics in the RHOAI Dashboard for the models-as-a-service project.
+# Per RHOAI 3.4 docs, a project must contain a LocalQueue before the Workload metrics page
+# shows CPU/memory usage for distributed workloads.
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: local-queue-default
+  namespace: models-as-a-service
+spec:
+  clusterQueueName: default

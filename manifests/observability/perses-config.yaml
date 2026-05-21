@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-science-perses-config
+  namespace: redhat-ods-monitoring
+data:
+  config.yaml: |
+    security:
+      readonly: false
+      cookie:
+        secure: true
+      enable_auth: false
+    database:
+      file:
+        folder: /tmp/local_db
+        extension: json

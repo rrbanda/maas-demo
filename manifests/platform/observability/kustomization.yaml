@@ -3,5 +3,7 @@ kind: Kustomization
 resources:
   - authorino-servicemonitor.yaml
   - limitador-servicemonitor.yaml
+  - kserve-servicemonitor.yaml
   - dashboard-configmap.yaml
   - prometheus-rules.yaml
+  - monitoringstack-patch.yaml

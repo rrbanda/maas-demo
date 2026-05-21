@@ -1,9 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - namespace.yaml
-  - subscription.yaml
-  - uiplugin.yaml
-  - perses-instance.yaml
+  - perses-rbac.yaml
+  - perses-config.yaml
+  - perses-deployment.yaml
+  - perses-service.yaml
   - perses-datasource.yaml
-  - perses-dashboard.yaml
+  - perses-dashboards.yaml

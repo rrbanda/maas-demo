@@ -6,6 +6,7 @@ metadata:
   labels:
     app: limitador
     app.kubernetes.io/part-of: ai-bridge-observability
+    monitoring.opendatahub.io/scrape: "true"
 spec:
   selector:
     matchLabels:
