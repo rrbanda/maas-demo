@@ -1,28 +1,25 @@
-# GlobalDatasource: makes Thanos available to all Perses projects/dashboards.
-# Uses the pod's projected ServiceAccount token (auto-rotated by Kubernetes, no manual expiry).
+# PersesGlobalDatasource: makes Thanos available to all Perses projects/dashboards.
+# Uses kubernetesAuth (pod SA token) — auto-rotated, no manual expiry.
 # The data-science-perses SA must have cluster-monitoring-view ClusterRole (see perses-rbac.yaml).
-apiVersion: perses.dev/v1alpha2
-kind: PersesGlobalSecret
-metadata:
-  name: thanos-datasource-secret
-spec:
-  tlsConfig:
-    insecureSkipVerify: true
-  authorization:
-    type: Bearer
-    credentialsFile: /var/run/secrets/kubernetes.io/serviceaccount/token
----
 apiVersion: perses.dev/v1alpha2
 kind: PersesGlobalDatasource
 metadata:
-  name: PrometheusDatasource
+  name: prometheus-datasource
 spec:
-  default: true
-  plugin:
-    kind: PrometheusDatasource
-    spec:
-      proxy:
-        kind: HTTPProxy
-        spec:
-          url: "https://thanos-querier.openshift-monitoring.svc:9091"
-          secret: thanos-datasource-secret
+  client:
+    kubernetesAuth:
+      enable: true
+    tls:
+      enable: true
+      insecureSkipVerify: true
+  config:
+    default: true
+    display:
+      name: "Thanos (OpenShift Monitoring)"
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        proxy:
+          kind: HTTPProxy
+          spec:
+            url: "https://thanos-querier.openshift-monitoring.svc:9091"
