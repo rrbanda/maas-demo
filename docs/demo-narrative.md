@@ -22,6 +22,10 @@ This section provides the exact URLs, credentials, and commands to execute the d
 | **Keycloak** | `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | admin console |
 | **GitHub Repo** | `https://github.com/rrbanda/maas-demo` | Public (no login) |
 
+> **Screenshots reference**: All screenshots below are in `docs/images/`. If clusters are re-provisioned, retake them — the CRD names and structure remain the same.
+
+![RHOAI Dashboard](images/rhoai-dashboard-main.png)
+
 ### Terminal Setup
 
 ```bash
@@ -56,6 +60,8 @@ export API_KEY="<paste-key-here>"
 - Show the Applications list — 28 apps synced
 - Click `maas-demo-gateway` → show it sources from `github.com/rrbanda/maas-demo` (path: `clusters/live/gateway`, branch: `main`)
 - Point out: operators, instances, models all managed by ApplicationSets
+
+![ArgoCD Applications](images/argocd-apps.png)
 
 **UI (GitHub tab):**
 - Show repo structure: `clusters/live/`, `manifests/`, `profiles/`, `scripts/`
@@ -136,6 +142,8 @@ curl -sk "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/comp
 - Search → `MaaSSubscription` → show 7 subscriptions with different priorities
 - Search → `TokenRateLimitPolicy` → show auto-generated policies
 
+![MaaS Subscriptions](images/console-subscriptions.png)
+
 **CLI:**
 ```bash
 # Tiered subscriptions
@@ -161,6 +169,8 @@ oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service 
   - `qwen25-7b-instruct` → Cluster 2 vLLM
   - `gemini-2-0-flash` → Google Gemini API
 
+![ExternalModels](images/console-externalmodels.png)
+
 **CLI:**
 ```bash
 # Cross-cluster vLLM
@@ -185,6 +195,8 @@ curl -sk "https://${MAAS_GW}/models-as-a-service/gemini-2-0-flash/v1/chat/comple
 **UI (OpenShift Console):**
 - Search → `ExternalSecret` → show 2 secrets synced from Vault (Status: SecretSynced)
 - Search → `SecretStore` → show vault-backend (Valid)
+
+![ExternalSecrets from Vault](images/console-externalsecrets.png)
 
 **CLI:**
 ```bash
