@@ -35,9 +35,10 @@ export API_KEY="<paste-key-here>"   # see Appendix A for generation steps
 
 | Slot | Acts to cover |
 |------|---------------|
-| **60 min** | All 8 acts + Appendix F (Guardrails) |
+| **60 min** | All acts (1–8 + 4.5 + 7.5) + Appendix F (Guardrails) |
 | **45 min** | Acts 1–8, skip OIDC deep-dive in Act 7 |
 | **30 min** | Acts 1, 3, 4, 5, 8 (core governance + ExternalModel) |
+| **20 min** | Acts 1, 3, 5, 8 (quick overview) |
 
 ### PoC Success Criteria Mapping
 
@@ -63,6 +64,8 @@ export API_KEY="<paste-key-here>"   # see Appendix A for generation steps
 - Point out the ApplicationSets: `cluster-operators`, `cluster-instances`, `cluster-models`, `cluster-services`
 
 ![ArgoCD Applications](images/argocd-apps.png)
+
+![ArgoCD maas-demo-gateway Detail](images/argocd-maas-detail.png)
 
 **UI — GitHub:**
 - Open `https://github.com/rrbanda/maas-demo` → show `clusters/live/`, `manifests/`, `profiles/`
@@ -181,7 +184,52 @@ oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service 
 # → team-c-basic: 5,000 tokens/min
 ```
 
+**Live Proof — Rate Limit 429:**
+```bash
+# Burst test: team-c-basic subscription (5000 tokens/min for qwen25-7b-instruct)
+# Send large-prompt requests (~1138 tokens each) until limit is hit:
+
+export TEAM_C_KEY="sk-oai-12WKiHJm..."  # team-c-basic subscription key
+
+for i in 1 2 3 4 5; do
+  curl -sk -o /tmp/r$i.json -w "Request $i: HTTP %{http_code}\n" \
+    "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+    -H "Authorization: Bearer $TEAM_C_KEY" -H "Content-Type: application/json" \
+    -d '{"model":"qwen25-7b-instruct","max_tokens":100,"messages":[{"role":"user","content":"<large prompt ~1000 tokens>"}]}'
+done
+# → Request 1: HTTP 200 (Tokens: 1138)
+# → Request 2: HTTP 200 (Tokens: 1138)
+# → Request 3: HTTP 200 (Tokens: 1138)
+# → Request 4: HTTP 200 (Tokens: 1138)
+# → Request 5: HTTP 429   ← RATE LIMITED! (4552/5000 tokens consumed)
+
+# Meanwhile, premium-tier key continues unaffected:
+curl -sk -w "HTTP %{http_code}\n" \
+  "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
+  -H "Authorization: Bearer $PREMIUM_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"Hello"}],"max_tokens":50}'
+# → HTTP 200 (premium has 100,000 tokens/min — unaffected)
+```
+
 **Takeaway:** Three tiers, independent budgets. When basic hits its limit (HTTP 429), premium continues unaffected. This is noisy-neighbor protection at the token level.
+
+---
+
+## Act 4.5: Self-Service via RHOAI Dashboard (3 min)
+
+**Say:** "Platform teams define subscriptions in Git. Consumers self-serve through the RHOAI Dashboard — browse available models, see their tier limits, and generate API keys without touching the command line."
+
+**UI — RHOAI Dashboard:**
+- Open `https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com`
+- Navigate to **Gen AI studio** → **AI asset endpoints** → **Models as a service** tab
+- Show the models list: `qwen25-7b-instruct`, `gemini-2-0-flash`, `gemma2-9b-fp8`
+- Click "View" on `qwen25-7b-instruct` → show the MaaS route and subscription details
+- Click "Generate API Key" → show the key generation dialog
+- Point out "Tier information" showing the token budget per subscription
+
+![RHOAI Dashboard](images/rhoai-dashboard-main.png)
+
+**Takeaway:** End users never need `kubectl`. The RHOAI Dashboard provides a complete self-service experience — model catalog, key generation, tier visibility. Platform teams control everything declaratively via Git.
 
 ---
 
@@ -256,13 +304,44 @@ oc get externalsecret gemini-credentials -n models-as-a-service \
 # → Last refresh: 2026-05-21T16:25:55Z
 ```
 
-**Takeaway:** Vault stores provider credentials. ESO syncs them every hour. The `bbr-managed=true` label tells the MaaS credential injection plugin where to find them. Rotation is automatic — update Vault, wait for sync, done.
+**Live Proof — Secret Rotation:**
+```bash
+# Step 1: Current K8s secret value
+oc get secret vllm-cluster2-credentials -n models-as-a-service \
+  -o jsonpath='{.data.api-key}' | base64 -d
+# → not-required-direct-access
+
+# Step 2: Rotate in Vault
+VAULT_POD=$(oc get pod -n vault-dev -l app.kubernetes.io/name=vault -o name | head -1)
+oc exec -n vault-dev $VAULT_POD -- sh -c \
+  "VAULT_TOKEN=demo-root-token vault kv put secret/vllm-cluster2-credentials api-key=ROTATED-key-$(date +%s)"
+# → Success (version 2)
+
+# Step 3: Force ExternalSecret refresh
+oc annotate externalsecret vllm-cluster2-credentials -n models-as-a-service \
+  force-sync=$(date +%s) --overwrite
+# → externalsecret annotated
+
+# Step 4: Verify (< 5 seconds!)
+oc get secret vllm-cluster2-credentials -n models-as-a-service \
+  -o jsonpath='{.data.api-key}' | base64 -d
+# → ROTATED-key-1779391511  ← Updated automatically!
+```
+
+**Takeaway:** Vault stores provider credentials. ESO syncs them every hour (or instantly on annotation). The `bbr-managed=true` label tells the MaaS credential injection plugin where to find them. Rotation is automatic — update Vault, trigger sync, done in seconds.
 
 ---
 
 ## Act 7: Identity Federation (3 min)
 
 **Say:** "API keys are for automation. For human operators, MaaS supports OIDC/SSO. The same enterprise identity that logs into internal tools accesses models. Dual auth — both enforced at the gateway."
+
+**UI — Keycloak Admin:**
+- Open `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/admin/`
+- Show the `ai-bridge` realm
+- Navigate to Clients → show `ai-bridge-gateway` client (OIDC client configured for the MaaS gateway)
+
+![Keycloak Realm](images/keycloak-realm.png)
 
 **CLI:**
 ```bash
@@ -281,6 +360,36 @@ echo "Token: ${TOKEN:0:30}... (${#TOKEN} chars)"
 ```
 
 **Takeaway:** Dual auth model — `sk-oai-*` keys for CI/CD and SDKs, OIDC tokens for humans and dashboards. Both validated at the gateway. Swap Keycloak for Okta/Azure AD with a config change.
+
+---
+
+## Act 7.5: Observability — Perses Dashboard (2 min)
+
+**Say:** "Every request through the AI Bridge is observable. The Cluster Observability Operator provides native Perses dashboards directly in the OpenShift Console — request rates, latency percentiles, and rate-limited events by model and subscription."
+
+**UI — OpenShift Console:**
+- Navigate to **Observe → Dashboards**
+- Select the **MaaS AI Bridge - Gateway Metrics** dashboard
+- Show 4 panels: Total API Requests, Requests by Model, Rate Limited (429), Request Latency (p99)
+
+![Perses Dashboard](images/perses-dashboard.png)
+
+**CLI:**
+```bash
+# Cluster Observability Operator deployed
+oc get csv -n openshift-cluster-observability-operator | grep observability
+# → cluster-observability-operator.v1.4.0   Succeeded
+
+# PersesDashboard CR in models-as-a-service namespace
+oc get persesdashboard -n models-as-a-service
+# → maas-ai-bridge-metrics   (shows in Console under Observe → Dashboards)
+
+# UIPlugin enables the dashboard in OpenShift Console
+oc get uiplugin
+# → dashboards   (enables Observe → Dashboards menu)
+```
+
+**Takeaway:** Observability is built in. The Perses dashboard gives platform teams real-time visibility into API usage, rate limiting events, and latency — without external tools.
 
 ---
 
@@ -303,10 +412,11 @@ echo "Token: ${TOKEN:0:30}... (${#TOKEN} chars)"
 1. **GitOps-managed** — 28 ArgoCD apps from 2 repos, zero manual steps
 2. **Zero-trust auth** — every request validated (API key or OIDC)
 3. **Multi-cluster + multi-provider** — one gateway, any backend via ExternalModel
-4. **Token-based rate limiting** — per-team budgets, noisy-neighbor protection
-5. **Vault-synced secrets** — auto-rotation, never in Git
+4. **Token-based rate limiting** — per-team budgets, noisy-neighbor protection (live 429 proof)
+5. **Vault-synced secrets** — auto-rotation in seconds, never in Git (live rotation proof)
 6. **OpenAI-compatible** — change `base_url` only
 7. **Self-service** — teams generate keys via RHOAI Dashboard
+8. **Observable** — Perses dashboards for real-time gateway metrics
 
 **Next steps for the customer:**
 - Adding a new model backend = one `ExternalModel` CR + one Secret

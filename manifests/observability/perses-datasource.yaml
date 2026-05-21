@@ -1,0 +1,17 @@
+apiVersion: perses.dev/v1alpha2
+kind: PersesDatasource
+metadata:
+  name: thanos-querier
+  namespace: models-as-a-service
+spec:
+  config:
+    default: true
+    display:
+      name: "Thanos Querier"
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        proxy:
+          kind: HTTPProxy
+          spec:
+            url: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"

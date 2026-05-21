@@ -1,0 +1,115 @@
+apiVersion: perses.dev/v1alpha1
+kind: PersesDashboard
+metadata:
+  name: maas-ai-bridge-metrics
+  namespace: models-as-a-service
+spec:
+  display:
+    name: "MaaS AI Bridge - Gateway Metrics"
+  duration: 1h
+  variables: []
+  panels:
+    totalRequests:
+      kind: Panel
+      spec:
+        display:
+          name: "Total API Requests"
+          description: "Total HTTP requests to MaaS gateway"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'sum(rate(istio_requests_total{destination_service_namespace="models-as-a-service"}[5m])) by (response_code)'
+    requestsByModel:
+      kind: Panel
+      spec:
+        display:
+          name: "Requests by Model"
+          description: "Request rate per model"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'sum(rate(istio_requests_total{destination_service_namespace="models-as-a-service"}[5m])) by (destination_service_name)'
+    rateLimitedRequests:
+      kind: Panel
+      spec:
+        display:
+          name: "Rate Limited (429)"
+          description: "Rate of 429 responses from rate limiting"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'sum(rate(istio_requests_total{destination_service_namespace="models-as-a-service",response_code="429"}[5m]))'
+    requestLatency:
+      kind: Panel
+      spec:
+        display:
+          name: "Request Latency (p99)"
+          description: "99th percentile request duration"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{destination_service_namespace="models-as-a-service"}[5m])) by (le, destination_service_name))'
+  layouts:
+    - kind: Grid
+      spec:
+        display:
+          title: "AI Bridge - MaaS Metrics"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            "y": 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/totalRequests"
+          - x: 12
+            "y": 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/requestsByModel"
+          - x: 0
+            "y": 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/rateLimitedRequests"
+          - x: 12
+            "y": 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/requestLatency"

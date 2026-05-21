@@ -1,0 +1,24 @@
+=== Rate Limit Proof: team-c-basic subscription (5000 tokens/min) ===
+Model: qwen25-7b-instruct
+API Key: sk-oai-12WKiHJm...  (team-c-basic subscription)
+
+$ curl -s https://$MAAS_GW/models-as-a-service/qwen25-7b-instruct/v1/chat/completions \
+    -H "Authorization: Bearer $TEAM_C_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"qwen25-7b-instruct","max_tokens":100,"messages":[...]}'
+
+Request 1: HTTP 200 | Tokens: 1138
+Request 2: HTTP 200 | Tokens: 1138
+Request 3: HTTP 200 | Tokens: 1138
+Request 4: HTTP 200 | Tokens: 1138
+Request 5: HTTP 429 | "Too Many Requests"   ← RATE LIMITED!
+
+Total tokens consumed before limit: 4552 / 5000 (tokens/min)
+Rate limit triggered on 5th request as expected.
+
+$ curl -s https://$MAAS_GW/models-as-a-service/qwen25-7b-instruct/v1/chat/completions \
+    -H "Authorization: Bearer $TEAM_C_KEY" -H "Content-Type: application/json" \
+    -d '{"model":"qwen25-7b-instruct","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}'
+
+Too Many Requests
+HTTP 429

@@ -1,0 +1,6 @@
+apiVersion: perses.dev/v1alpha1
+kind: Perses
+metadata:
+  name: perses
+  namespace: models-as-a-service
+spec: {}

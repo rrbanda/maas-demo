@@ -1,0 +1,29 @@
+============================================
+  VAULT SECRET ROTATION DEMO
+============================================
+
+Step 1: Current K8s Secret value
+$ oc get secret vllm-cluster2-credentials -n models-as-a-service -o jsonpath='{.data.api-key}' | base64 -d
+→ not-required-direct-access
+
+Step 2: Write rotated value to Vault
+$ oc exec vault-pod -- vault kv put secret/vllm-cluster2-credentials api-key=ROTATED-key-1779391511
+→ Success (version 2)
+
+Step 3: Verify in Vault
+$ oc exec vault-pod -- vault kv get -field=api-key secret/vllm-cluster2-credentials
+→ ROTATED-key-1779391511
+
+Step 4: Force ExternalSecret refresh
+$ oc annotate externalsecret vllm-cluster2-credentials -n models-as-a-service force-sync=$(date +%s) --overwrite
+→ externalsecret.external-secrets.io/vllm-cluster2-credentials annotated
+
+Step 5: K8s secret updated automatically (< 5 seconds)
+$ oc get secret vllm-cluster2-credentials -n models-as-a-service -o jsonpath='{.data.api-key}' | base64 -d
+→ ROTATED-key-1779391511
+
+============================================
+  SECRET ROTATION CONFIRMED!
+  Vault → ExternalSecret Operator → K8s Secret
+  Propagation time: < 5 seconds
+============================================
