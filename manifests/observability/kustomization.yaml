@@ -7,3 +7,4 @@ resources:
   - perses-service.yaml
   - perses-datasource.yaml
   - perses-dashboards.yaml
+  - perses-init-job.yaml
