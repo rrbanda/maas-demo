@@ -40,6 +40,62 @@ subjects:
     name: perses-init
     namespace: redhat-ods-monitoring
 ---
+# CronJob to refresh Perses authentication token every 4 hours
+# Prevents "Unauthorized" errors when the SA token expires
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: perses-token-refresh
+  namespace: redhat-ods-monitoring
+spec:
+  schedule: "0 */4 * * *"
+  concurrencyPolicy: Replace
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: perses-init
+          restartPolicy: OnFailure
+          containers:
+            - name: refresh
+              image: registry.redhat.io/openshift4/ose-cli:latest
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -e
+                  PERSES_URL="http://data-science-perses.redhat-ods-monitoring.svc:8080"
+                  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                  
+                  # Wait for Perses
+                  for i in $(seq 1 30); do
+                    curl -s "$PERSES_URL/api/v1/health" | grep -q "database" && break
+                    sleep 5
+                  done
+                  
+                  # Refresh GlobalSecret with new token
+                  curl -s -X DELETE "$PERSES_URL/api/v1/globalsecrets/thanos-auth" > /dev/null 2>&1 || true
+                  curl -s -X POST "$PERSES_URL/api/v1/globalsecrets" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"kind\":\"GlobalSecret\",\"metadata\":{\"name\":\"thanos-auth\"},\"spec\":{\"tlsConfig\":{\"insecureSkipVerify\":true},\"authorization\":{\"type\":\"Bearer\",\"credentials\":\"$TOKEN\"}}}" > /dev/null
+                  
+                  # Recreate datasources with fresh secret reference
+                  curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/prometheus" > /dev/null 2>&1 || true
+                  curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
+                    -H "Content-Type: application/json" \
+                    -d '{"kind":"GlobalDatasource","metadata":{"name":"prometheus"},"spec":{"default":true,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
+                  
+                  curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/kuadrant-prometheus-datasource" > /dev/null 2>&1 || true
+                  curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
+                    -H "Content-Type: application/json" \
+                    -d '{"kind":"GlobalDatasource","metadata":{"name":"kuadrant-prometheus-datasource"},"spec":{"default":false,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
+                  
+                  echo "Token refreshed at $(date)"
+---
+# Initial Job runs once on ArgoCD sync to set up Perses completely
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -58,9 +114,8 @@ spec:
       containers:
         - name: init
           image: registry.redhat.io/openshift4/ose-cli:latest
-          command:
-            - /bin/bash
-            - -c
+          command: ["/bin/bash", "-c"]
+          args:
             - |
               set -e
               PERSES_URL="http://data-science-perses.redhat-ods-monitoring.svc:8080"
@@ -80,18 +135,14 @@ spec:
                   echo "ERROR: Perses not ready after 10 minutes"
                   exit 1
                 fi
-                echo "  Waiting... ($i/60)"
                 sleep 10
               done
               
-              # Get SA token for Thanos authentication
+              # Get SA token
               TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
               echo "Token obtained (length: ${#TOKEN})"
               
-              # ============================================
-              # STEP 1: Create Projects
-              # ============================================
-              echo ""
+              # Create Projects
               echo "Creating projects..."
               for project in redhat-ods-monitoring models-as-a-service redhat-ods-applications; do
                 curl -s -X POST "$PERSES_URL/api/v1/projects" \
@@ -100,177 +151,57 @@ spec:
                 echo "  Created: $project"
               done
               
-              # ============================================
-              # STEP 2: Create GlobalSecret for TLS + Auth
-              # ============================================
-              echo ""
-              echo "Creating GlobalSecret (thanos-auth)..."
-              # Delete existing if present
+              # Create GlobalSecret
+              echo "Creating GlobalSecret..."
               curl -s -X DELETE "$PERSES_URL/api/v1/globalsecrets/thanos-auth" > /dev/null 2>&1 || true
-              
-              # Create with TLS skip verify and Bearer token
               curl -s -X POST "$PERSES_URL/api/v1/globalsecrets" \
                 -H "Content-Type: application/json" \
-                -d "{
-                  \"kind\": \"GlobalSecret\",
-                  \"metadata\": {\"name\": \"thanos-auth\"},
-                  \"spec\": {
-                    \"tlsConfig\": {
-                      \"insecureSkipVerify\": true
-                    },
-                    \"authorization\": {
-                      \"type\": \"Bearer\",
-                      \"credentials\": \"$TOKEN\"
-                    }
-                  }
-                }" > /dev/null
-              echo "  Created: thanos-auth"
+                -d "{\"kind\":\"GlobalSecret\",\"metadata\":{\"name\":\"thanos-auth\"},\"spec\":{\"tlsConfig\":{\"insecureSkipVerify\":true},\"authorization\":{\"type\":\"Bearer\",\"credentials\":\"$TOKEN\"}}}" > /dev/null
               
-              # ============================================
-              # STEP 3: Create GlobalDatasources
-              # ============================================
-              echo ""
+              # Create Datasources
               echo "Creating GlobalDatasources..."
-              
-              # Delete existing datasources
               curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/prometheus" > /dev/null 2>&1 || true
+              curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
+                -H "Content-Type: application/json" \
+                -d '{"kind":"GlobalDatasource","metadata":{"name":"prometheus"},"spec":{"default":true,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
+              
               curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/kuadrant-prometheus-datasource" > /dev/null 2>&1 || true
-              
-              # Create default prometheus datasource
               curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
                 -H "Content-Type: application/json" \
-                -d '{
-                  "kind": "GlobalDatasource",
-                  "metadata": {"name": "prometheus"},
-                  "spec": {
-                    "default": true,
-                    "plugin": {
-                      "kind": "PrometheusDatasource",
-                      "spec": {
-                        "proxy": {
-                          "kind": "HTTPProxy",
-                          "spec": {
-                            "url": "https://thanos-querier.openshift-monitoring.svc:9091",
-                            "allowedEndpoints": [
-                              {"endpointPattern": "/api/v1/.*", "method": "GET"},
-                              {"endpointPattern": "/api/v1/.*", "method": "POST"}
-                            ],
-                            "secret": "thanos-auth"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }' > /dev/null
-              echo "  Created: prometheus (default)"
+                -d '{"kind":"GlobalDatasource","metadata":{"name":"kuadrant-prometheus-datasource"},"spec":{"default":false,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
               
-              # Create kuadrant datasource (required by MaaS Usage dashboard)
-              curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
-                -H "Content-Type: application/json" \
-                -d '{
-                  "kind": "GlobalDatasource",
-                  "metadata": {"name": "kuadrant-prometheus-datasource"},
-                  "spec": {
-                    "default": false,
-                    "plugin": {
-                      "kind": "PrometheusDatasource",
-                      "spec": {
-                        "proxy": {
-                          "kind": "HTTPProxy",
-                          "spec": {
-                            "url": "https://thanos-querier.openshift-monitoring.svc:9091",
-                            "allowedEndpoints": [
-                              {"endpointPattern": "/api/v1/.*", "method": "GET"},
-                              {"endpointPattern": "/api/v1/.*", "method": "POST"}
-                            ],
-                            "secret": "thanos-auth"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }' > /dev/null
-              echo "  Created: kuadrant-prometheus-datasource"
-              
-              # ============================================
-              # STEP 4: Push Dashboards from PersesDashboard CRs
-              # ============================================
-              echo ""
+              # Push Dashboards
               echo "Pushing dashboards..."
-              
-              # Function to push dashboard
-              push_dashboard() {
-                local name=$1
-                local namespace=$2
-                local project=$3
-                
-                echo "  Processing: $name (from $namespace)"
-                
-                # Get the config from the PersesDashboard CR (note: .spec.config not .spec)
-                CONFIG=$(oc get persesdashboard "$name" -n "$namespace" -o jsonpath='{.spec.config}' 2>/dev/null || echo "")
-                
-                if [ -z "$CONFIG" ] || [ "$CONFIG" = "null" ]; then
-                  echo "    WARNING: No config found, skipping"
-                  return
+              for dash in dashboard-0-cluster-admin dashboard-1-model maas-gateway-metrics; do
+                CONFIG=$(oc get persesdashboard "$dash" -n redhat-ods-monitoring -o jsonpath='{.spec.config}' 2>/dev/null || echo "")
+                if [ -n "$CONFIG" ] && [ "$CONFIG" != "null" ]; then
+                  curl -s -X DELETE "$PERSES_URL/api/v1/projects/redhat-ods-monitoring/dashboards/$dash" > /dev/null 2>&1 || true
+                  RESULT=$(curl -s -X POST "$PERSES_URL/api/v1/projects/redhat-ods-monitoring/dashboards" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"kind\":\"Dashboard\",\"metadata\":{\"name\":\"$dash\",\"project\":\"redhat-ods-monitoring\"},\"spec\":$CONFIG}")
+                  DISPLAY=$(echo "$RESULT" | grep -o '"display":{"name":"[^"]*"' | head -1 | sed 's/.*"name":"//' | sed 's/"//' || echo "$dash")
+                  echo "  $DISPLAY"
                 fi
-                
-                # Delete existing dashboard
-                curl -s -X DELETE "$PERSES_URL/api/v1/projects/$project/dashboards/$name" > /dev/null 2>&1 || true
-                
-                # Push new dashboard
-                RESULT=$(curl -s -X POST "$PERSES_URL/api/v1/projects/$project/dashboards" \
+              done
+              
+              # Usage dashboard
+              CONFIG=$(oc get persesdashboard dashboard-3-maas-usage-admin -n redhat-ods-applications -o jsonpath='{.spec.config}' 2>/dev/null || echo "")
+              if [ -n "$CONFIG" ] && [ "$CONFIG" != "null" ]; then
+                curl -s -X DELETE "$PERSES_URL/api/v1/projects/redhat-ods-monitoring/dashboards/dashboard-3-maas-usage-admin" > /dev/null 2>&1 || true
+                curl -s -X POST "$PERSES_URL/api/v1/projects/redhat-ods-monitoring/dashboards" \
                   -H "Content-Type: application/json" \
-                  -d "{\"kind\":\"Dashboard\",\"metadata\":{\"name\":\"$name\",\"project\":\"$project\"},\"spec\":$CONFIG}")
-                
-                if echo "$RESULT" | grep -q '"kind":"Dashboard"'; then
-                  DISPLAY=$(echo "$RESULT" | grep -o '"display":{"name":"[^"]*"' | head -1 | sed 's/.*"name":"//' | sed 's/"//')
-                  echo "    OK: $DISPLAY"
-                else
-                  echo "    ERROR: $(echo $RESULT | head -c 100)"
-                fi
-              }
+                  -d "{\"kind\":\"Dashboard\",\"metadata\":{\"name\":\"dashboard-3-maas-usage-admin\",\"project\":\"redhat-ods-monitoring\"},\"spec\":$CONFIG}" > /dev/null
+                echo "  Usage"
+              fi
               
-              # Push dashboards from redhat-ods-monitoring
-              push_dashboard "dashboard-0-cluster-admin" "redhat-ods-monitoring" "redhat-ods-monitoring"
-              push_dashboard "dashboard-1-model" "redhat-ods-monitoring" "redhat-ods-monitoring"
-              push_dashboard "maas-gateway-metrics" "redhat-ods-monitoring" "redhat-ods-monitoring"
-              
-              # Push dashboard from redhat-ods-applications
-              push_dashboard "dashboard-3-maas-usage-admin" "redhat-ods-applications" "redhat-ods-monitoring"
-              
-              # Push dashboard from models-as-a-service
-              push_dashboard "maas-ai-bridge-metrics" "models-as-a-service" "models-as-a-service"
-              
-              # ============================================
-              # STEP 5: Verify
-              # ============================================
-              echo ""
-              echo "============================================"
-              echo "Verification"
-              echo "============================================"
-              
-              echo "Projects:"
-              curl -s "$PERSES_URL/api/v1/projects" | grep -o '"name":"[^"]*"' | sed 's/"name":"//g' | sed 's/"//g' | sed 's/^/  /'
-              
-              echo ""
-              echo "Datasources:"
-              curl -s "$PERSES_URL/api/v1/globaldatasources" | grep -o '"name":"[^"]*"' | sed 's/"name":"//g' | sed 's/"//g' | sed 's/^/  /'
-              
-              echo ""
-              echo "Secrets:"
-              curl -s "$PERSES_URL/api/v1/globalsecrets" | grep -o '"name":"[^"]*"' | sed 's/"name":"//g' | sed 's/"//g' | sed 's/^/  /'
-              
-              echo ""
-              echo "Dashboards in redhat-ods-monitoring:"
-              curl -s "$PERSES_URL/api/v1/projects/redhat-ods-monitoring/dashboards" | grep -o '"display":{"name":"[^"]*"' | sed 's/"display":{"name":"//g' | sed 's/"//g' | sed 's/^/  /'
-              
+              # Verify
               echo ""
               echo "Testing datasource connectivity..."
               RESULT=$(curl -s "$PERSES_URL/proxy/globaldatasources/prometheus/api/v1/query?query=up" | head -c 100)
               if echo "$RESULT" | grep -q '"status":"success"'; then
-                echo "  Datasource: OK (can query Thanos)"
+                echo "  Datasource: OK"
               else
-                echo "  Datasource: ERROR - $RESULT"
+                echo "  Datasource: ERROR"
               fi
               
               echo ""
