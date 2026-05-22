@@ -8,7 +8,7 @@ metadata:
   name: local-queue-default
   namespace: models-as-a-service
 spec:
-  clusterQueueName: default
+  clusterQueue: default
 ---
 apiVersion: kueue.x-k8s.io/v1beta1
 kind: LocalQueue
@@ -16,4 +16,4 @@ metadata:
   name: local-queue-default
   namespace: ai-guardrails
 spec:
-  clusterQueueName: default
+  clusterQueue: default
