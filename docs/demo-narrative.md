@@ -7,6 +7,41 @@
 
 ---
 
+## Executive Summary: What This Demo Proves
+
+### The Problem
+
+When a large enterprise wants to let hundreds of teams use AI models, they face chaos:
+- **Access control**: Who gets access to which models?
+- **Resource management**: How do you stop one team from hogging all the capacity?
+- **Accountability**: How do you track who used what and how much?
+- **Security**: How do you manage API keys without sharing credentials?
+
+### The Solution (AI Bridge / MaaS)
+
+This demo shows a **"single front door"** for AI model access with built-in governance controls.
+
+| Capability | What It Means |
+|------------|---------------|
+| **One entry point, many models** | Users don't need to know where models physically run. Hit one URL, the system routes to the right model. |
+| **Per-team controls** | Team A can use Model X with 1000 tokens/min. Team B can use Model Y with 5000 tokens/min. Each team gets their own API key. |
+| **Guardrails that work** | Exceed your limit → "slow down" (429). Bad API key → "access denied" (401). Other teams are unaffected. |
+| **Enterprise-ready** | Secrets rotate automatically via Vault. Everything managed via GitOps (auditable, repeatable). Fits existing infrastructure. |
+
+### The Bottom Line
+
+| Without AI Bridge | With AI Bridge |
+|-------------------|----------------|
+| IT has no visibility | Centralized governance |
+| Teams share API keys | Per-team quotas and keys |
+| One runaway app crashes the model for everyone | Isolated rate limits per subscription |
+| No audit trail | Full audit trail via GitOps |
+| Security nightmare | Enterprise security standards met |
+
+**Think of it as:** A smart lobby with a badge reader in front of your AI building, instead of leaving the doors wide open.
+
+---
+
 ## Quick Reference
 
 ### Credentials and URLs
