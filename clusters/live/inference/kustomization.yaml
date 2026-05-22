@@ -3,14 +3,14 @@ kind: Kustomization
 resources:
   - ../../../profiles/multi-cluster/inference-cluster
 patches:
-  # Guardrails Deployment — VLLM_URL env var
+  # Guardrails Deployment — VLLM_URL env var (pointing to gemma2-9b-fp8)
   - target:
       kind: Deployment
       name: guardrails-gateway
     patch: |-
       - op: replace
         path: /spec/template/spec/containers/1/env/0/value
-        value: "https://qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000"
+        value: "https://gemma2-9b-fp8-kserve-workload-svc.models-as-a-service.svc:8000"
   # Guardrails ConfigMap — orchestrator.py with actual VLLM URL
   - target:
       kind: ConfigMap
@@ -25,7 +25,7 @@ patches:
           import urllib.request
           import os
 
-          VLLM_URL = os.environ.get("VLLM_URL", "https://qwen25-7b-instruct-kserve-workload-svc.llm-inference.svc:8000")
+          VLLM_URL = os.environ.get("VLLM_URL", "https://gemma2-9b-fp8-kserve-workload-svc.models-as-a-service.svc:8000")
 
           class OrchestratorHandler(http.server.BaseHTTPRequestHandler):
               def do_POST(self):
@@ -61,14 +61,6 @@ patches:
               server = http.server.HTTPServer(("0.0.0.0", 8085), OrchestratorHandler)
               print("Orchestrator proxy listening on :8085")
               server.serve_forever()
-  # llm-d HTTPRoute — commented out until Gateway API Inference Extension is supported
-  # - target:
-  #     kind: HTTPRoute
-  #     name: llm-d-inference-route
-  #   patch: |-
-  #     - op: replace
-  #       path: /spec/hostnames/0
-  #       value: llm-d-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
   # OIDC AuthConfig — MaaS gateway host + Keycloak issuer
   - target:
       kind: AuthConfig

@@ -43,11 +43,3 @@ patches:
       - op: replace
         path: /spec/rules/authentication/keycloak-jwt/jwt/issuerUrl
         value: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
-  # ExternalModel — Inference cluster endpoint (ELB hostname)
-  - target:
-      kind: ExternalModel
-      name: qwen25-7b-instruct
-    patch: |-
-      - op: replace
-        path: /spec/endpoint
-        value: ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com

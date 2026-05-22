@@ -1,0 +1,29 @@
+# llm-d Standalone Mode configuration
+# This deploys EPP + Envoy proxy together, enabling intelligent routing
+# without requiring Gateway API Inference Extension support
+
+inferenceExtension:
+  replicas: 1
+  image:
+    # Use the same RHOAI image that's already deployed
+    registry: registry.redhat.io
+    repository: rhoai/odh-llm-d-inference-scheduler-rhel9
+    tag: sha256:bddf686d6eaf1a607e1c697f58165d685944607cb4629648f27e56b2884e3de0
+    pullPolicy: IfNotPresent
+  extProcPort: 9002
+  extraServicePorts:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  env: []
+  pluginsConfigFile: "default-plugins.yaml"
+  endpointsServer:
+    # Don't create a new InferencePool - use the existing one
+    createInferencePool: false
+    # Select the vLLM pods
+    endpointSelector: app.kubernetes.io/part-of=llminferenceservice
+    targetPorts: 8000
+    modelServerType: vllm
+  sidecar:
+    enabled: true
