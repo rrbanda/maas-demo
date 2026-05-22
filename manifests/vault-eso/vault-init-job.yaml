@@ -24,12 +24,20 @@ spec:
                 echo "Waiting for Vault..."
                 sleep 2
               done
+              echo "Populating AI Bridge secrets..."
               vault kv put secret/ai-bridge/api-keys \
                 team-a-key="$TEAM_A_KEY" \
                 team-b-key="$TEAM_B_KEY"
               vault kv put secret/ai-bridge/db-credentials \
                 postgres-password="$POSTGRES_PASSWORD" \
                 postgres-url="$DATABASE_URL"
+              echo "Populating ExternalModel provider credentials..."
+              vault kv put secret/gemini-credentials \
+                api-key="$GEMINI_API_KEY"
+              vault kv put secret/vllm-cluster2-credentials \
+                api-key="$VLLM_BEARER_TOKEN"
+              echo "Vault initialization complete."
+              vault kv list secret/
           env:
             - name: VAULT_ADDR
               value: "http://vault.vault-dev.svc:8200"
@@ -58,6 +66,16 @@ spec:
                 secretKeyRef:
                   name: vault-seed-credentials
                   key: database-url
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: gemini-api-key
+            - name: VLLM_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-seed-credentials
+                  key: vllm-bearer-token
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
