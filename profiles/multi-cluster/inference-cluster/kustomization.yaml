@@ -11,6 +11,8 @@ resources:
   - ../../../manifests/platform/maas-postgres
   - ../../../manifests/platform/observability
   - ../../../manifests/platform/authorino-tls
+  # Observability (Perses dashboards initialization)
+  - ../../../manifests/observability
   # llm-d (scheduler for intelligent inference routing)
   - ../../../manifests/llm-d
   # Guardrails
