@@ -9,6 +9,9 @@ metadata:
 spec:
   serviceName: postgresql
   replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
   selector:
     matchLabels:
       app: postgresql
@@ -79,10 +82,14 @@ spec:
       partition: 0
     type: RollingUpdate
   volumeClaimTemplates:
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
-        accessModes: ["ReadWriteOnce"]
+        accessModes:
+          - ReadWriteOnce
         resources:
           requests:
             storage: 5Gi
+        volumeMode: Filesystem
