@@ -79,6 +79,10 @@ MaaS provides a **"single front door"** for AI model access with built-in govern
 | MaaS Gateway | `https://<MAAS_GATEWAY_HOST>` |
 | OpenShift Console | `https://console-openshift-console.apps.<CLUSTER_DOMAIN>` |
 
+### RHOAI Dashboard Overview
+
+![RHOAI Dashboard](images/rhoai-dashboard-main.png)
+
 ### Terminal Setup
 
 ```bash
@@ -150,6 +154,10 @@ Cluster admins enable it once. The operator handles the rest."
 **UI — RHOAI Dashboard:**
 - Settings → Subscriptions → show list of subscriptions
 - Click a subscription to show details (groups, models, limits)
+
+![Admin Subscriptions List](images/screenshots/05-admin-subscriptions-list.png)
+
+![Admin Subscription Detail](images/screenshots/06-admin-subscription-detail.png)
 
 **CLI:**
 ```bash
@@ -272,6 +280,8 @@ The `sk-oai-*` key format is intentionally OpenAI-like. Existing OpenAI SDK code
 - Gen AI studio → AI asset endpoints
 - Show models list with status indicators
 
+![User Models List](images/screenshots/01-user-models-list.png)
+
 **Available models:**
 - `gemini-2-0-flash` — External model (Google Gemini)
 - `gemma2-9b-fp8` — Local model (vLLM on Cluster 1)
@@ -284,10 +294,20 @@ The `sk-oai-*` key format is intentionally OpenAI-like. Existing OpenAI SDK code
 - Click "Generate API key"
 - Copy the `sk-oai-*` key (shown only once)
 
+![View Endpoint and Generate Key](images/screenshots/02-user-view-endpoint-apikey.png)
+
+![API Key Generated](images/screenshots/03-user-apikey-generated.png)
+
 **Key properties:**
 - **Ephemeral keys**: 1-hour expiration, don't appear in key list
 - **Persistent keys**: Custom expiration up to 90 days
 - Format: `sk-oai-*` (OpenAI-compatible)
+
+### SHOW: Manage API Keys
+
+**UI — Gen AI studio → API keys:**
+
+![User API Keys List](images/screenshots/07-user-apikeys-list.png)
 
 ### SHOW: Test in Playground
 
@@ -296,6 +316,8 @@ The `sk-oai-*` key format is intentionally OpenAI-like. Existing OpenAI SDK code
 - Chat interactively
 - Adjust parameters (temperature, max tokens)
 - Copy code snippets for SDK integration
+
+![User Playground](images/screenshots/08-user-playground.png)
 
 ### SHOW: Make API Calls
 
@@ -377,6 +399,8 @@ curl -sk -w "HTTP %{http_code}\n" -o /dev/null \
 
 ### SHOW: ExternalModel — Google Gemini
 
+![ExternalModels in Console](images/console-externalmodels.png)
+
 ```bash
 # Same gateway, same key format — routes to Google Gemini
 oc get externalmodels -n models-as-a-service
@@ -409,6 +433,8 @@ curl -sk "https://${MAAS_GW}/models-as-a-service/gemini-2-0-flash/v1/chat/comple
 "Credentials are never in Git. HashiCorp Vault is the source of truth. External Secrets Operator syncs them to Kubernetes with automatic refresh. Zero-downtime rotation."
 
 ### SHOW: Vault Integration
+
+![ExternalSecrets from Vault](images/console-externalsecrets.png)
 
 ```bash
 # ExternalSecrets synced from Vault
