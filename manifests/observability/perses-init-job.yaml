@@ -40,21 +40,22 @@ subjects:
     name: perses-init
     namespace: redhat-ods-monitoring
 ---
-# CronJob to refresh Perses authentication token every 4 hours
+# CronJob to refresh Perses authentication token every 2 hours
 # Prevents "Unauthorized" errors when the SA token expires
+# Token validity is 24h; 2h refresh provides adequate safety margin
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: perses-token-refresh
   namespace: redhat-ods-monitoring
 spec:
-  schedule: "0 */4 * * *"
+  schedule: "0 */2 * * *"
   concurrencyPolicy: Replace
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
   jobTemplate:
     spec:
-      ttlSecondsAfterFinished: 600
+      ttlSecondsAfterFinished: 3600
       backoffLimit: 3
       template:
         spec:
@@ -70,30 +71,57 @@ spec:
                   PERSES_URL="http://data-science-perses.redhat-ods-monitoring.svc:8080"
                   TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
                   
-                  # Wait for Perses
+                  echo "[$(date -Iseconds)] Starting Perses token refresh..."
+                  
+                  # Wait for Perses with timeout
+                  echo "Waiting for Perses to be ready..."
                   for i in $(seq 1 30); do
-                    curl -s "$PERSES_URL/api/v1/health" | grep -q "database" && break
+                    if curl -sf "$PERSES_URL/api/v1/health" | grep -q "database"; then
+                      echo "Perses is ready."
+                      break
+                    fi
+                    if [ $i -eq 30 ]; then
+                      echo "ERROR: Perses not ready after 150 seconds"
+                      exit 1
+                    fi
                     sleep 5
                   done
                   
                   # Refresh GlobalSecret with new token
-                  curl -s -X DELETE "$PERSES_URL/api/v1/globalsecrets/thanos-auth" > /dev/null 2>&1 || true
-                  curl -s -X POST "$PERSES_URL/api/v1/globalsecrets" \
+                  echo "Refreshing thanos-auth GlobalSecret..."
+                  curl -sf -X DELETE "$PERSES_URL/api/v1/globalsecrets/thanos-auth" > /dev/null 2>&1 || true
+                  RESULT=$(curl -sf -X POST "$PERSES_URL/api/v1/globalsecrets" \
                     -H "Content-Type: application/json" \
-                    -d "{\"kind\":\"GlobalSecret\",\"metadata\":{\"name\":\"thanos-auth\"},\"spec\":{\"tlsConfig\":{\"insecureSkipVerify\":true},\"authorization\":{\"type\":\"Bearer\",\"credentials\":\"$TOKEN\"}}}" > /dev/null
+                    -d "{\"kind\":\"GlobalSecret\",\"metadata\":{\"name\":\"thanos-auth\"},\"spec\":{\"tlsConfig\":{\"insecureSkipVerify\":true},\"authorization\":{\"type\":\"Bearer\",\"credentials\":\"$TOKEN\"}}}")
+                  if [ $? -ne 0 ]; then
+                    echo "ERROR: Failed to create GlobalSecret"
+                    exit 1
+                  fi
+                  echo "GlobalSecret created."
                   
                   # Recreate datasources with fresh secret reference
-                  curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/prometheus" > /dev/null 2>&1 || true
-                  curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
+                  echo "Refreshing GlobalDatasources..."
+                  curl -sf -X DELETE "$PERSES_URL/api/v1/globaldatasources/prometheus" > /dev/null 2>&1 || true
+                  curl -sf -X POST "$PERSES_URL/api/v1/globaldatasources" \
                     -H "Content-Type: application/json" \
                     -d '{"kind":"GlobalDatasource","metadata":{"name":"prometheus"},"spec":{"default":true,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
                   
-                  curl -s -X DELETE "$PERSES_URL/api/v1/globaldatasources/kuadrant-prometheus-datasource" > /dev/null 2>&1 || true
-                  curl -s -X POST "$PERSES_URL/api/v1/globaldatasources" \
+                  curl -sf -X DELETE "$PERSES_URL/api/v1/globaldatasources/kuadrant-prometheus-datasource" > /dev/null 2>&1 || true
+                  curl -sf -X POST "$PERSES_URL/api/v1/globaldatasources" \
                     -H "Content-Type: application/json" \
                     -d '{"kind":"GlobalDatasource","metadata":{"name":"kuadrant-prometheus-datasource"},"spec":{"default":false,"plugin":{"kind":"PrometheusDatasource","spec":{"proxy":{"kind":"HTTPProxy","spec":{"url":"https://thanos-querier.openshift-monitoring.svc:9091","allowedEndpoints":[{"endpointPattern":"/api/v1/.*","method":"GET"},{"endpointPattern":"/api/v1/.*","method":"POST"}],"secret":"thanos-auth"}}}}}}' > /dev/null
+                  echo "GlobalDatasources refreshed."
                   
-                  echo "Token refreshed at $(date)"
+                  # Verify connectivity
+                  echo "Verifying datasource connectivity..."
+                  VERIFY=$(curl -sf "$PERSES_URL/proxy/globaldatasources/prometheus/api/v1/query?query=up" 2>&1 | head -c 100)
+                  if echo "$VERIFY" | grep -q '"status":"success"'; then
+                    echo "Verification: OK"
+                  else
+                    echo "WARNING: Datasource verification returned unexpected result"
+                  fi
+                  
+                  echo "[$(date -Iseconds)] Token refresh completed successfully."
 ---
 # Initial Job runs once on ArgoCD sync to set up Perses completely
 apiVersion: batch/v1

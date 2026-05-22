@@ -5,6 +5,7 @@ resources:
   - perses-config.yaml
   - perses-deployment.yaml
   - perses-service.yaml
-  - perses-datasource.yaml
+  # perses-datasource.yaml removed - causes perses-operator crash (no Perses CR exists)
+  # Datasource is configured via API in perses-init-job.yaml instead
   - perses-dashboards.yaml
   - perses-init-job.yaml
