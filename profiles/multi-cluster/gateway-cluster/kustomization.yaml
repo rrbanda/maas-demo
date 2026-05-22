@@ -1,8 +1,10 @@
 # Multi-cluster profile: gateway cluster (CPU).
-# Deploys the AI Gateway, Vault, ESO, and ExternalModel components.
+# Deploys the AI Bridge with centralized MaaS governance, Vault, ESO, and ExternalModel routing.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # MaaS Governance (Tenant, Subscriptions, AuthPolicies)
+  - ../../../manifests/maas-governance
   # AI Gateway (multi-cluster routing)
   - ../../../manifests/ai-gateway
   # Kuadrant (AuthPolicy + RateLimitPolicy enforcement)

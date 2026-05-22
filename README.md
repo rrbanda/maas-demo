@@ -58,6 +58,8 @@ flowchart TB
 
 All consumer traffic enters through the MaaS gateway on Cluster 1 (AI Bridge). The gateway validates API keys, enforces rate limits, then injects provider credentials and routes to the appropriate backend. Consumers never see or handle provider credentials.
 
+> **llm-d Status:** The dashed line from llm-d EPP indicates it's deployed but not yet in the active traffic path. llm-d provides intelligent replica selection when multiple vLLM replicas exist. Full integration requires Gateway API Inference Extension support (see `docs/architecture.md` for details).
+
 ```mermaid
 sequenceDiagram
     participant C as Client
@@ -186,7 +188,9 @@ maas-demo/
 │   │   ├── maas-postgres/                # PostgreSQL (MaaS state store)
 │   │   ├── monitoring-config/            # User workload monitoring
 │   │   └── observability/                # ServiceMonitors + Dashboard
-│   ├── model/                            # Model deployment + subscriptions
+│   ├── maas-governance/                   # MaaS Tenant, Subscriptions, AuthPolicies (GitOps)
+│   ├── model/                            # Model deployment (for inference cluster)
+│   ├── external-models/                  # ExternalModel CRs + provider credentials
 │   ├── llm-d/                            # Endpoint Picker Pod (intelligent routing)
 │   ├── ai-gateway/                       # Multi-cluster Istio routing + OIDC auth
 │   ├── guardrails/                       # Content safety gateway (PII regex)

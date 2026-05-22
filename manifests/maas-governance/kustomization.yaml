@@ -1,0 +1,9 @@
+# MaaS Governance resources for AI Bridge (Cluster 1)
+# Includes Tenant, Subscriptions, and AuthPolicies for centralized governance
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - tenant.yaml
+  - subscriptions.yaml
+  - auth-policies.yaml

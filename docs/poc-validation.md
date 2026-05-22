@@ -114,16 +114,21 @@ ai-bridge-db-credentials   SecretSynced   True
 
 **Current scope:** The synced K8s Secrets demonstrate the rotation mechanism. They are not consumed by the MaaS gateway workloads in this demo (wiring is environment-specific). Production use would mount these secrets into the relevant pods.
 
-### Bonus — Multi-Cluster Routing
+### Bonus — Multi-Cluster Routing via ExternalModel
 
-Routes directly to the model's OpenShift Route on the inference cluster (bypasses MaaS auth layer):
+The `ExternalModel` CRs on Cluster 1 (AI Bridge) route governed traffic to models on Cluster 2 (Inference Worker):
 
 ```bash
-$ curl http://<AI_GW_HOST>:80/v1/chat/completions \
+# Via MaaS Gateway (full governance: auth + rate limiting)
+$ curl https://<MAAS_GW_HOST>/models-as-a-service/qwen25-7b-instruct/v1/chat/completions \
+  -H "Authorization: Bearer sk-oai-..." \
   -d '{"model":"qwen25-7b-instruct","messages":[{"role":"user","content":"What is 1+1?"}],"max_tokens":20}'
 → {"model": "qwen25-7b-instruct", "choices": [{"message": {"content": "1+1 equals 2."}}]}
-  (request enters on gateway cluster, inference runs on inference cluster)
+  (request enters AI Bridge, governance applied, routed to Cluster 2 vLLM)
 ```
+
+**Traffic flow:**
+- Client → MaaS Gateway (Cluster 1) → Authorino (API key validation) → Limitador (rate limiting) → ExternalModel → Cluster 2 vLLM
 
 ### Bonus — Guardrails (PII Regex Detection)
 
@@ -162,5 +167,5 @@ The script tests all 8 success criteria plus bonus capabilities and outputs a pa
 | MaaS auth enforcement | Gateway may be in permissive mode during initial setup; tighten AuthPolicy for production |
 | OIDC | Requires bring-your-own IdP; not functional without external provider configured |
 | Vault secrets | Demonstrates rotation mechanism only; not consumed by MaaS workloads in this demo |
-| Multi-cluster auth | AI Gateway path bypasses MaaS auth; production should route through MaaS |
+| Multi-cluster auth | ExternalModel path routes through MaaS auth; legacy AI Gateway path (if used) bypasses MaaS |
 | Guardrails | Regex-only; no LLM-based or semantic content analysis |

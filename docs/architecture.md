@@ -4,8 +4,8 @@
 
 This document describes the AI Bridge demonstration environment built on Red Hat OpenShift AI (RHOAI) 3.4. The environment validates the Models-as-a-Service (MaaS) capabilities using two OpenShift clusters:
 
-- **Cluster 1 (AI Bridge)**: Centralized MaaS governance — authentication, rate limiting, usage tracking, ExternalModel routing. No GPUs, no models running here.
-- **Cluster 2 (Inference Worker)**: GPU cluster running vLLM (Qwen2.5-7B-Instruct). Secured with a bearer token. No governance — all governance is centralized on Cluster 1.
+- **Cluster 1 (AI Bridge)**: Centralized MaaS governance — authentication, rate limiting, usage tracking, ExternalModel routing. This cluster CAN serve local models (e.g., `gemma2-9b-fp8` for demo purposes) but the primary pattern is routing to external backends.
+- **Cluster 2 (Inference Worker)**: GPU cluster running vLLM (Qwen2.5-7B-Instruct). Exposed via OpenShift Route. All governance is centralized on Cluster 1 via ExternalModel.
 
 The demo also routes to **Google Gemini** as an external provider via `ExternalModel`, demonstrating that the AI Bridge can govern any OpenAI-compatible backend regardless of where it runs.
 
@@ -62,6 +62,8 @@ flowchart TB
 ```
 
 **Single governance path:** All consumer traffic enters through the MaaS gateway on Cluster 1. The gateway validates API keys, enforces per-subscription token rate limits, then injects the appropriate provider credential and routes to the backend. Consumers never see or handle provider credentials.
+
+> **Note on llm-d:** The dashed line from llm-d EPP to vLLM indicates that llm-d is deployed but not yet in the active traffic path. Currently, traffic routes directly to vLLM via the OpenShift Route. When Gateway API Inference Extension is fully supported, traffic will flow: MaaS Gateway → llm-d → optimal vLLM replica.
 
 **ExternalModel pattern:** The `ExternalModel` CR on Cluster 1 declares a backend (hostname + provider type + credential reference). The MaaS `payload-processing` plugin resolves the model, injects credentials from the referenced Secret, and forwards. Adding a new backend = one `ExternalModel` CR + one Secret.
 
@@ -142,12 +144,28 @@ curl -H "Authorization: Bearer <api-key>" \
 
 #### A3. llm-d Intelligent Routing
 
-**What it is:** The llm-d Endpoint Picker Pod provides inference-aware request routing using the Gateway API `InferencePool` and `InferenceModel` CRDs from `inference.networking.x-k8s.io`. It routes requests to the optimal vLLM replica based on load, KV cache utilization, and model availability.
+**What it is:** The llm-d Endpoint Picker Pod (EPP) provides inference-aware request routing using the Gateway API `InferencePool` and `InferenceModel` CRDs. When multiple vLLM replicas exist, llm-d routes requests to the optimal replica based on load, KV cache utilization, and queue depth.
 
-**What's deployed:**
-- `InferencePool` (API: `inference.networking.k8s.io/v1` — GA)
-- `InferenceModel` (API: `inference.networking.x-k8s.io/v1alpha2`)
-- EPP Deployment with proper RBAC for both API groups
+**Deployment Status:**
+- `InferencePool` (API: `inference.networking.k8s.io/v1` — GA) ✓
+- `InferenceModel` (API: `inference.networking.x-k8s.io/v1alpha2`) ✓
+- EPP Deployment with RBAC for both API groups ✓
+- llm-d is healthy and tracking vLLM pods ✓
+
+**Integration Status:**
+> **Current limitation:** The OpenShift gateway controller (v1) does not yet support `InferencePool` as an HTTPRoute backendRef. The error `referencing unsupported backendRef: group "inference.networking.k8s.io" kind "InferencePool"` indicates that while the Gateway API Inference Extension is enabled (`ENABLE_GATEWAY_API_INFERENCE_EXTENSION=true`), the controller-side support is incomplete.
+>
+> **Current behavior:** Traffic from AI Bridge routes directly to vLLM via OpenShift Route, bypassing llm-d.
+>
+> **Target behavior (when fully integrated):** AI Bridge → llm-d HTTPRoute → InferencePool → optimal vLLM replica.
+>
+> This is expected to be resolved in a future RHOAI release with full Gateway API Inference Extension support.
+
+**What llm-d provides (when integrated):**
+- Load-aware routing across vLLM replicas
+- KV cache utilization-based scheduling
+- Queue depth monitoring for backpressure
+- Metrics collection from inference pods
 
 #### A4. Multi-Cluster Routing via ExternalModel
 

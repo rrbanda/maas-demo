@@ -13,22 +13,24 @@
 
 | Tab | URL | Login |
 |-----|-----|-------|
-| **ArgoCD** | `https://openshift-gitops-server-openshift-gitops.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | admin / `CMXginUm5TxZwzLp0qe31IJWdVEtho6r` |
-| **RHOAI Dashboard** | `https://rhods-dashboard-redhat-ods-applications.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | OpenShift SSO (admin / MzA0NjE1NjM2) |
-| **OpenShift Console** | `https://console-openshift-console.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | htpasswd: admin / MzA0NjE1NjM2 |
-| **Keycloak** | `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` | admin console |
+| **ArgoCD** | `https://openshift-gitops-server-openshift-gitops.apps.<CLUSTER_DOMAIN>` | admin / `<ARGOCD_PASSWORD>` |
+| **RHOAI Dashboard** | `https://rh-ai.apps.<CLUSTER_DOMAIN>` | OpenShift SSO (admin / `<OCP_PASSWORD>`) |
+| **OpenShift Console** | `https://console-openshift-console.apps.<CLUSTER_DOMAIN>` | htpasswd: admin / `<OCP_PASSWORD>` |
+| **Keycloak** | `https://keycloak-keycloak.apps.<CLUSTER_DOMAIN>` | admin console |
 | **GitHub Repo** | `https://github.com/rrbanda/maas-demo` | Public |
+
+> **Note**: Replace `<CLUSTER_DOMAIN>`, `<OCP_PASSWORD>`, and `<ARGOCD_PASSWORD>` with your actual values. Do not commit credentials to Git.
 
 > If clusters are re-provisioned, replace the hostnames above. The CRD names, structure, and demo flow remain the same.
 
 ### Terminal Setup
 
 ```bash
-oc login https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443 \
-  --username=admin --password=MzA0NjE1NjM2 --insecure-skip-tls-verify
+oc login https://api.<CLUSTER_DOMAIN>:6443 \
+  --username=admin --password=<OCP_PASSWORD> --insecure-skip-tls-verify
 
-export MAAS_GW="ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com"
-export API_KEY="<paste-key-here>"   # see Appendix A for generation steps
+export MAAS_GW="<MAAS_GATEWAY_HOST>"  # e.g., ae7a90237753943bb8619a15f4c4ff3e-*.elb.amazonaws.com
+export API_KEY="<YOUR_API_KEY>"       # Generate via RHOAI Dashboard or MaaS API
 ```
 
 ### Timing Options
@@ -88,7 +90,7 @@ oc get application.argoproj.io maas-demo-gateway -n openshift-gitops \
 
 ## Act 2: Platform + Model (3 min)
 
-**Say:** "RHOAI 3.4 introduces MaaS as a governance layer. One config change enables it. The model itself runs on a separate GPU cluster — the AI Bridge has no GPUs, only governance."
+**Say:** "RHOAI 3.4 introduces MaaS as a governance layer. One config change enables it. The AI Bridge can serve local models AND route to remote GPU clusters or cloud APIs via ExternalModel. All access is governed centrally."
 
 **UI — OpenShift Console:**
 - Navigate: Operators → Installed Operators → show RHOAI 3.4, Red Hat Connectivity Link, External Secrets Operator
@@ -107,17 +109,17 @@ oc get tenant default-tenant -n models-as-a-service
 #   default-tenant   True    Reconciled   3d
 
 # Model running on Cluster 2 (GPU)
-oc login https://api.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com:6443 \
-  --username=admin --password=MTUwNTY2NDE3 --insecure-skip-tls-verify
+oc login https://api.<INFERENCE_CLUSTER_DOMAIN>:6443 \
+  --username=admin --password=<INFERENCE_OCP_PASSWORD> --insecure-skip-tls-verify
 oc get pods -n llm-inference --no-headers | grep Running
 # → qwen25-7b-instruct-kserve-*   1/1   Running
 
 # Switch back to AI Bridge
-oc login https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443 \
-  --username=admin --password=MzA0NjE1NjM2 --insecure-skip-tls-verify
+oc login https://api.<CLUSTER_DOMAIN>:6443 \
+  --username=admin --password=<OCP_PASSWORD> --insecure-skip-tls-verify
 ```
 
-**Takeaway:** AI Bridge (Cluster 1) = governance only. Cluster 2 = GPU inference. They're connected via `ExternalModel` CRs (shown in Act 5).
+**Takeaway:** AI Bridge (Cluster 1) = centralized governance. It can serve local models AND route to Cluster 2 (GPU inference) and cloud APIs via `ExternalModel` CRs (shown in Act 5).
 
 ---
 
@@ -189,7 +191,7 @@ oc get tokenratelimitpolicy maas-trlp-qwen25-7b-instruct -n models-as-a-service 
 # Burst test: team-c-basic subscription (5000 tokens/min for qwen25-7b-instruct)
 # Send large-prompt requests (~1138 tokens each) until limit is hit:
 
-export TEAM_C_KEY="sk-oai-12WKiHJm..."  # team-c-basic subscription key
+export TEAM_C_KEY="<TEAM_C_API_KEY>"  # team-c-basic subscription key (generate via Dashboard)
 
 for i in 1 2 3 4 5; do
   curl -sk -o /tmp/r$i.json -w "Request $i: HTTP %{http_code}\n" \
@@ -220,7 +222,7 @@ curl -sk -w "HTTP %{http_code}\n" \
 **Say:** "Platform teams define subscriptions in Git. Consumers self-serve through the RHOAI Dashboard — browse available models, see their tier limits, and generate API keys without touching the command line."
 
 **UI — RHOAI Dashboard:**
-- Open `https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com`
+- Open `https://rh-ai.apps.<CLUSTER_DOMAIN>`
 - Navigate to **Gen AI studio** → **AI asset endpoints** → **Models as a service** tab
 - Show the models list: `qwen25-7b-instruct`, `gemini-2-0-flash`, `gemma2-9b-fp8`
 - Click "View" on `qwen25-7b-instruct` → show the MaaS route and subscription details
@@ -235,7 +237,7 @@ curl -sk -w "HTTP %{http_code}\n" \
 
 ## Act 5: ExternalModel — Multi-Provider (5 min)
 
-**Say:** "The AI Bridge runs no models. It uses `ExternalModel` CRs to route to any backend — a remote GPU cluster, or a cloud API like Gemini. Same API key, same URL pattern, same governance. The consumer never knows where the model runs."
+**Say:** "The AI Bridge's primary role is centralized governance. While it CAN run local models (like `gemma2-9b-fp8` in this demo), the key pattern is using `ExternalModel` CRs to route to any backend — a remote GPU cluster, or a cloud API like Gemini. Same API key, same URL pattern, same governance. The consumer never knows where the model runs."
 
 **UI — OpenShift Console:**
 - Search → `ExternalModel` → namespace `models-as-a-service`
@@ -249,7 +251,7 @@ curl -sk -w "HTTP %{http_code}\n" \
 oc get externalmodels -n models-as-a-service \
   -o custom-columns="NAME:.metadata.name,PROVIDER:.spec.provider,TARGET:.spec.targetModel,ENDPOINT:.spec.endpoint"
 # → gemini-2-0-flash     openai   gemini-2.0-flash     generativelanguage.googleapis.com
-#   qwen25-7b-instruct   openai   qwen25-7b-instruct   qwen25-7b-inference-llm-inference.apps.cluster-4l6x6...
+#   qwen25-7b-instruct   openai   qwen25-7b-instruct   qwen25-7b-inference-llm-inference.apps.<INFERENCE_CLUSTER>...
 
 # Cross-cluster vLLM inference (same API key!)
 curl -sk "https://${MAAS_GW}/models-as-a-service/qwen25-7b-instruct/v1/chat/completions" \
@@ -337,7 +339,7 @@ oc get secret vllm-cluster2-credentials -n models-as-a-service \
 **Say:** "API keys are for automation. For human operators, MaaS supports OIDC/SSO. The same enterprise identity that logs into internal tools accesses models. Dual auth — both enforced at the gateway."
 
 **UI — Keycloak Admin:**
-- Open `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/admin/`
+- Open `https://keycloak-keycloak.apps.<CLUSTER_DOMAIN>/admin/`
 - Show the `ai-bridge` realm
 - Navigate to Clients → show `ai-bridge-gateway` client (OIDC client configured for the MaaS gateway)
 
@@ -346,10 +348,10 @@ oc get secret vllm-cluster2-credentials -n models-as-a-service \
 **CLI:**
 ```bash
 # Keycloak OIDC discovery
-KC_HOST="keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com"
+KC_HOST="keycloak-keycloak.apps.<CLUSTER_DOMAIN>"
 curl -sk "https://${KC_HOST}/realms/ai-bridge/.well-known/openid-configuration" \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(f'Issuer: {d[\"issuer\"]}')"
-# → Issuer: https://keycloak-keycloak.apps.cluster-6crhb.../realms/ai-bridge
+# → Issuer: https://keycloak-keycloak.apps.<CLUSTER_DOMAIN>/realms/ai-bridge
 
 # Get OIDC token (client credentials flow)
 TOKEN=$(curl -sk "https://${KC_HOST}/realms/ai-bridge/protocol/openid-connect/token" \
@@ -450,7 +452,7 @@ curl -sk -X POST "https://localhost:9443/v1/api-keys" \
   -H 'X-MaaS-Group: ["system:cluster-admins","system:authenticated:oauth","system:authenticated"]' \
   -H "Content-Type: application/json" \
   -d '{"subscription":"team-a-premium","name":"demo-key"}'
-# → {"key":"sk-oai-CKmx...","subscription":"team-a-premium",...}
+# → {"key":"sk-oai-<GENERATED_KEY>","subscription":"team-a-premium",...}
 
 # Kill port-forward
 kill %1
@@ -469,8 +471,8 @@ If something fails during the live demo:
 
 ```bash
 # If model isn't responding, test vLLM directly on Cluster 2
-oc login https://api.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com:6443 \
-  --username=admin --password=MTUwNTY2NDE3 --insecure-skip-tls-verify
+oc login https://api.<INFERENCE_CLUSTER_DOMAIN>:6443 \
+  --username=admin --password=<INFERENCE_OCP_PASSWORD> --insecure-skip-tls-verify
 oc port-forward -n llm-inference svc/qwen25-7b-instruct-kserve-workload-svc 8443:8000 &
 sleep 2
 curl -sk https://localhost:8443/v1/models
@@ -608,16 +610,82 @@ curl -sk "http://${GUARDRAILS_HOST}/pii/v1/chat/completions" \
 
 ---
 
+## Appendix G: llm-d Intelligent Routing
+
+### What is llm-d?
+
+llm-d (LLM Daemon) is the inference scheduler component that provides intelligent request routing across vLLM replicas. It uses the Gateway API Inference Extension (`InferencePool` and `InferenceModel` CRDs) to make routing decisions based on:
+
+- **KV cache utilization** — routes to replicas with available cache capacity
+- **Queue depth** — avoids overloaded replicas
+- **Load balancing** — distributes requests optimally across replicas
+
+### Current Deployment Status
+
+| Component | Status |
+|-----------|--------|
+| llm-d EPP Pod | Running |
+| InferencePool CRD | Deployed |
+| InferenceModel CRD | Deployed |
+| vLLM pod tracking | Active |
+| HTTPRoute integration | **Not yet supported** |
+
+### Why llm-d isn't in the traffic path (yet)
+
+The OpenShift gateway controller doesn't currently support `InferencePool` as an HTTPRoute backendRef. When you create an HTTPRoute with:
+
+```yaml
+backendRefs:
+  - group: inference.networking.k8s.io
+    kind: InferencePool
+    name: qwen25-7b-pool
+```
+
+The controller reports: `referencing unsupported backendRef: group "inference.networking.k8s.io" kind "InferencePool"`
+
+**Current flow:** AI Bridge → ExternalModel → vLLM Route → vLLM (direct)
+
+**Target flow (when integrated):** AI Bridge → ExternalModel → llm-d HTTPRoute → InferencePool → optimal vLLM replica
+
+### Verification Commands
+
+```bash
+# Check llm-d EPP health
+oc get pods -n llm-inference -l app=llm-d-epp
+
+# Check InferencePool
+oc get inferencepool -n llm-inference
+
+# Check InferenceModel
+oc get inferencemodel -n llm-inference
+
+# View llm-d logs (shows pod tracking)
+oc logs -n llm-inference deployment/llm-d-epp --tail=20
+```
+
+### When llm-d matters
+
+llm-d becomes valuable when:
+- You have **multiple vLLM replicas** (scaling for throughput)
+- You need **KV cache-aware routing** (avoiding cache misses)
+- You want **intelligent load balancing** (beyond round-robin)
+
+For single-replica deployments (like this demo), traffic goes directly to vLLM without significant routing benefit.
+
+---
+
 ## Environment Details (for reference)
 
-| Resource | Value |
-|----------|-------|
-| Cluster 1 (AI Bridge) API | `https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443` |
-| Cluster 2 (Inference) API | `https://api.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com:6443` |
-| MaaS Gateway (ELB) | `ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com` |
-| vLLM Route (Cluster 2) | `qwen25-7b-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com` |
-| Keycloak Issuer | `https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge` |
+| Resource | Value Template |
+|----------|----------------|
+| Cluster 1 (AI Bridge) API | `https://api.<CLUSTER_DOMAIN>:6443` |
+| Cluster 2 (Inference) API | `https://api.<INFERENCE_CLUSTER_DOMAIN>:6443` |
+| MaaS Gateway (ELB) | `<MAAS_GATEWAY_HOST>` (e.g., `*.elb.amazonaws.com`) |
+| vLLM Route (Cluster 2) | `<MODEL>-llm-inference.apps.<INFERENCE_CLUSTER_DOMAIN>` |
+| Keycloak Issuer | `https://keycloak-keycloak.apps.<CLUSTER_DOMAIN>/realms/ai-bridge` |
 | Vault (internal) | `http://vault.vault-dev.svc:8200` |
-| ArgoCD Apps | 28 (from `maas-demo` + `rhoai-deploy-gitops` repos) |
+| ArgoCD Apps | 28+ (from `maas-demo` + `rhoai-deploy-gitops` repos) |
 | Subscriptions | 7 (admin + 3 teams x 2 tiers) |
 | ExternalModels | 2 (qwen25-7b-instruct, gemini-2-0-flash) |
+
+> **Note**: Replace `<CLUSTER_DOMAIN>`, `<INFERENCE_CLUSTER_DOMAIN>`, and `<MAAS_GATEWAY_HOST>` with actual values for your environment.

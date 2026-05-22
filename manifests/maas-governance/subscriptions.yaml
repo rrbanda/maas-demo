@@ -1,0 +1,93 @@
+# MaaS Subscriptions for AI Bridge (Cluster 1)
+# Three-tier subscription model demonstrating per-team governance.
+# Priority: higher number = higher priority for API key generation default.
+#
+# Models referenced here are ExternalModels in models-as-a-service namespace:
+#   - qwen25-7b-instruct (routes to Cluster 2 vLLM)
+#   - gemini-2-0-flash (routes to Google Gemini API)
+#   - gemma2-9b-fp8 (local model on Cluster 1)
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-a-premium
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+    tier: premium
+spec:
+  owner:
+    users:
+      - team-a-lead
+      - admin
+    groups:
+      - name: "team-a"
+      - name: "system:authenticated"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 100000
+          window: "1m"
+    - name: gemini-2-0-flash
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 50000
+          window: "1m"
+    - name: gemma2-9b-fp8
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 100000
+          window: "1m"
+  priority: 10
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-b-standard
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+    tier: standard
+spec:
+  owner:
+    users:
+      - team-b-lead
+    groups:
+      - name: "team-b"
+      - name: "system:authenticated"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 20000
+          window: "1m"
+    - name: gemini-2-0-flash
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 10000
+          window: "1m"
+  priority: 5
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-c-basic
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+    tier: basic
+spec:
+  owner:
+    users:
+      - team-c-lead
+    groups:
+      - name: "team-c"
+      - name: "system:authenticated"
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 5000
+          window: "1m"
+  priority: 1

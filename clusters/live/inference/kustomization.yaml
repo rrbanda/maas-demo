@@ -61,6 +61,14 @@ patches:
               server = http.server.HTTPServer(("0.0.0.0", 8085), OrchestratorHandler)
               print("Orchestrator proxy listening on :8085")
               server.serve_forever()
+  # llm-d HTTPRoute — commented out until Gateway API Inference Extension is supported
+  # - target:
+  #     kind: HTTPRoute
+  #     name: llm-d-inference-route
+  #   patch: |-
+  #     - op: replace
+  #       path: /spec/hostnames/0
+  #       value: llm-d-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
   # OIDC AuthConfig — MaaS gateway host + Keycloak issuer
   - target:
       kind: AuthConfig

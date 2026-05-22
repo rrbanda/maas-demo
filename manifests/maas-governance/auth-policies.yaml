@@ -1,0 +1,38 @@
+# MaaS Auth Policies for AI Bridge (Cluster 1)
+# Defines which groups/users can access which models via the MaaS gateway.
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSAuthPolicy
+metadata:
+  name: external-models-auth
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+spec:
+  modelRefs:
+    - name: qwen25-7b-instruct
+      namespace: models-as-a-service
+    - name: gemini-2-0-flash
+      namespace: models-as-a-service
+  subjects:
+    groups:
+      - name: "system:authenticated"
+    users:
+      - "admin"
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSAuthPolicy
+metadata:
+  name: gemma2-9b-fp8-auth
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: ai-bridge
+spec:
+  modelRefs:
+    - name: gemma2-9b-fp8
+      namespace: models-as-a-service
+  subjects:
+    groups:
+      - name: "system:authenticated"
+    users:
+      - "admin"

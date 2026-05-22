@@ -1,6 +1,6 @@
 === Rate Limit Proof: team-c-basic subscription (5000 tokens/min) ===
 Model: qwen25-7b-instruct
-API Key: sk-oai-12WKiHJm...  (team-c-basic subscription)
+API Key: sk-oai-<REDACTED>  (team-c-basic subscription)
 
 $ curl -s https://$MAAS_GW/models-as-a-service/qwen25-7b-instruct/v1/chat/completions \
     -H "Authorization: Bearer $TEAM_C_KEY" \
