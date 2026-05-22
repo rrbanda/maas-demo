@@ -10,7 +10,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: authorino
+      app.kubernetes.io/part-of: authorino
   endpoints:
-    - port: metrics
+    - port: http
       interval: 15s

@@ -2,15 +2,21 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: kserve-vllm-metrics
-  namespace: models-as-a-service
+  namespace: llm-inference
   labels:
     app.kubernetes.io/part-of: ai-bridge-observability
     monitoring.opendatahub.io/scrape: "true"
 spec:
   selector:
     matchLabels:
-      kserve.io/component: workload
+      app.kubernetes.io/part-of: llminferenceservice
+  namespaceSelector:
+    matchNames:
+      - llm-inference
   endpoints:
-    - port: h2c
+    - port: https
       path: /metrics
       interval: 30s
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true

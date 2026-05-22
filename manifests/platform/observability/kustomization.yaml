@@ -6,4 +6,6 @@ resources:
   - kserve-servicemonitor.yaml
   - dashboard-configmap.yaml
   - prometheus-rules.yaml
-  - monitoringstack-patch.yaml
+  # MonitoringStack requires the Observability Operator (monitoring.rhobs CRDs).
+  # Only include on clusters where the operator is installed.
+  # - monitoringstack-patch.yaml
