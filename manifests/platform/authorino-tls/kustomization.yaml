@@ -2,4 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - authorino.yaml
-  - service-annotation.yaml
+  - clusterrolebindings.yaml
+# Note: The authorino-authorino-authorization Service is created and managed by
+# the Authorino operator. Do not define it here - let the operator manage it.
+# The TLS cert is configured via the Authorino CR's spec.listener.tls.certSecretRef.
+# The ClusterRoleBindings are also created by the operator but we define them here
+# because the operator copies our app labels, making ArgoCD track them.
