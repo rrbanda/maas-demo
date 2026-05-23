@@ -3,7 +3,8 @@ kind: Kustomization
 resources:
   - authorino-servicemonitor.yaml
   - limitador-servicemonitor.yaml
-  - kserve-servicemonitor.yaml
+  # kserve-servicemonitor.yaml targets llm-inference namespace (inference cluster only)
+  # Included via the inference-cluster profile, not the gateway profile
   - dashboard-configmap.yaml
   - prometheus-rules.yaml
   # MonitoringStack requires the Observability Operator (monitoring.rhobs CRDs).

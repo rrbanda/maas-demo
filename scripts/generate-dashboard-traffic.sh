@@ -1,131 +1,180 @@
 #!/bin/bash
-# Generate traffic for MaaS observability dashboard demo
-# Usage: ./generate-dashboard-traffic.sh [API_KEY]
+# Generate traffic for MaaS observability dashboard
 #
-# This script sends ~10 requests with various outcomes:
-# - Successful authenticated requests (200)
-# - Unauthenticated requests (401)
-# - Invalid key requests (403)
-# - Rate limit trigger attempts (429)
+# Usage:
+#   export API_KEY="sk-oai-..."
+#   export MAAS_GW="<gateway-elb-hostname>"
+#   ./scripts/generate-dashboard-traffic.sh [num_requests]
+#
+# Modes:
+#   ./scripts/generate-dashboard-traffic.sh         # 10 mixed requests (default)
+#   ./scripts/generate-dashboard-traffic.sh 100     # 100 authenticated requests
+#   ./scripts/generate-dashboard-traffic.sh 10000   # high volume for dashboard
 
 set -euo pipefail
 
-# Configuration
-MAAS_GW="${MAAS_GW:-maas.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com}"
+MAAS_GW="${MAAS_GW:?Set MAAS_GW (gateway ELB hostname)}"
+API_KEY="${API_KEY:?Set API_KEY (sk-oai-...)}"
 MODEL="${MODEL:-gemma2-9b-fp8}"
-API_KEY="${1:-${API_KEY:-}}"
+MODEL_PATH="/models-as-a-service/${MODEL}/v1/chat/completions"
+NUM_REQUESTS=${1:-10}
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
 
-log() { echo -e "${BLUE}[$(date +%H:%M:%S)]${NC} $1"; }
-success() { echo -e "${GREEN}✓${NC} $1"; }
-fail() { echo -e "${RED}✗${NC} $1"; }
-warn() { echo -e "${YELLOW}!${NC} $1"; }
+PROMPTS=(
+  "What is 2+2?"
+  "Explain AI in one sentence"
+  "Write hello world in Python"
+  "What is Kubernetes?"
+  "Name 3 colors"
+  "What is machine learning?"
+  "Define cloud computing"
+  "What is an API?"
+  "Explain containers briefly"
+  "What is OpenShift?"
+  "Hello"
+  "What is vLLM?"
+  "Define rate limiting"
+  "What is a GPU?"
+  "Explain inference"
+)
 
-# Function to make a request and report status
-make_request() {
-    local description="$1"
-    local auth_header="$2"
-    local expected_code="$3"
-    local prompt="${4:-What is 2+2?}"
-    
-    log "Request: $description"
-    
-    local response
-    local http_code
-    
-    response=$(curl -s -w "\n%{http_code}" -X POST "https://${MAAS_GW}/v1/chat/completions" \
-        ${auth_header:+-H "Authorization: Bearer $auth_header"} \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"model\": \"${MODEL}\",
-            \"messages\": [{\"role\": \"user\", \"content\": \"$prompt\"}],
-            \"max_tokens\": 50
-        }" 2>/dev/null || echo -e "\n000")
-    
-    http_code=$(echo "$response" | tail -1)
-    
-    if [[ "$http_code" == "$expected_code" ]]; then
-        success "Got expected $http_code"
-    else
-        fail "Expected $expected_code, got $http_code"
-    fi
-    
-    echo ""
-    sleep 1
+echo ""
+echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${CYAN}║${NC}  ${BOLD}MaaS Dashboard Traffic Generator${NC}"
+echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "   ${BOLD}Gateway:${NC}  https://$MAAS_GW"
+echo -e "   ${BOLD}Model:${NC}    $MODEL"
+echo -e "   ${BOLD}Path:${NC}     $MODEL_PATH"
+echo -e "   ${BOLD}Requests:${NC} $NUM_REQUESTS"
+echo -e "   ${BOLD}API Key:${NC}  ${API_KEY:0:20}..."
+echo ""
+
+SUCCESS=0
+FAIL_401=0
+FAIL_429=0
+FAIL_OTHER=0
+TOTAL_TOKENS=0
+
+send_request() {
+  local prompt="$1"
+  local max_tokens="${2:-10}"
+
+  local resp
+  resp=$(curl -sk -w "\n__HTTP__%{http_code}" --max-time 30 \
+    "https://${MAAS_GW}${MODEL_PATH}" \
+    -H "Authorization: Bearer $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"$prompt\"}],\"max_tokens\":$max_tokens}" 2>/dev/null || echo "__HTTP__000")
+
+  local http_code
+  http_code=$(echo "$resp" | grep "__HTTP__" | sed 's/.*__HTTP__//')
+  local body
+  body=$(echo "$resp" | grep -v "__HTTP__")
+
+  local tokens=0
+  if [ "$http_code" = "200" ]; then
+    tokens=$(echo "$body" | grep -o '"total_tokens":[0-9]*' | head -1 | sed 's/"total_tokens"://' || echo "0")
+    TOTAL_TOKENS=$((TOTAL_TOKENS + ${tokens:-0}))
+    SUCCESS=$((SUCCESS + 1))
+  elif [ "$http_code" = "401" ]; then
+    FAIL_401=$((FAIL_401 + 1))
+  elif [ "$http_code" = "429" ]; then
+    FAIL_429=$((FAIL_429 + 1))
+  else
+    FAIL_OTHER=$((FAIL_OTHER + 1))
+  fi
+
+  echo "$http_code $tokens"
 }
 
-echo ""
-echo "=========================================="
-echo "  MaaS Dashboard Traffic Generator"
-echo "=========================================="
-echo "Gateway: $MAAS_GW"
-echo "Model:   $MODEL"
-echo ""
+if [ "$NUM_REQUESTS" -le 20 ]; then
+  echo -e "${BLUE}── Sending $NUM_REQUESTS requests (detailed mode) ──${NC}"
+  echo ""
 
-if [[ -z "$API_KEY" ]]; then
-    warn "No API_KEY provided. Skipping authenticated requests."
-    warn "Usage: $0 <API_KEY> or export API_KEY=..."
-    echo ""
+  # 2 unauthenticated
+  echo -e "   ${DIM}[unauth]${NC} No API key..."
+  CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 \
+    "https://${MAAS_GW}${MODEL_PATH}" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"'$MODEL'","messages":[{"role":"user","content":"test"}],"max_tokens":5}' 2>/dev/null)
+  echo -e "            HTTP ${RED}${BOLD}$CODE${NC} (expected 401)"
+  FAIL_401=$((FAIL_401 + 1))
+
+  echo -e "   ${DIM}[bad key]${NC} Invalid API key..."
+  CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 \
+    "https://${MAAS_GW}${MODEL_PATH}" \
+    -H "Authorization: Bearer invalid-key" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"'$MODEL'","messages":[{"role":"user","content":"test"}],"max_tokens":5}' 2>/dev/null)
+  echo -e "            HTTP ${RED}${BOLD}$CODE${NC} (expected 401/403)"
+  FAIL_OTHER=$((FAIL_OTHER + 1))
+
+  echo ""
+  REMAINING=$((NUM_REQUESTS - 2))
+  [ "$REMAINING" -lt 1 ] && REMAINING=1
+
+  for i in $(seq 1 "$REMAINING"); do
+    PROMPT_IDX=$(( (i - 1) % ${#PROMPTS[@]} ))
+    PROMPT="${PROMPTS[$PROMPT_IDX]}"
+    RESULT=$(send_request "$PROMPT" 10)
+    CODE=$(echo "$RESULT" | awk '{print $1}')
+    TOKENS=$(echo "$RESULT" | awk '{print $2}')
+
+    if [ "$CODE" = "200" ]; then
+      printf "   ${DIM}[%3d/%d]${NC}  HTTP ${GREEN}${BOLD}%s${NC}  tokens=%-4s  ${DIM}%s${NC}\n" \
+        "$((i+2))" "$NUM_REQUESTS" "$CODE" "$TOKENS" "$PROMPT"
+    elif [ "$CODE" = "429" ]; then
+      printf "   ${DIM}[%3d/%d]${NC}  HTTP ${YELLOW}${BOLD}%s${NC}  ${DIM}rate limited${NC}\n" \
+        "$((i+2))" "$NUM_REQUESTS" "$CODE"
+      sleep 2
+    else
+      printf "   ${DIM}[%3d/%d]${NC}  HTTP ${RED}${BOLD}%s${NC}\n" "$((i+2))" "$NUM_REQUESTS" "$CODE"
+    fi
+    sleep 0.3
+  done
+
+else
+  echo -e "${BLUE}── Sending $NUM_REQUESTS requests (high volume mode) ──${NC}"
+  echo ""
+
+  BATCH_SIZE=50
+  BATCH_NUM=0
+  for i in $(seq 1 "$NUM_REQUESTS"); do
+    PROMPT_IDX=$(( (i - 1) % ${#PROMPTS[@]} ))
+    PROMPT="${PROMPTS[$PROMPT_IDX]}"
+    send_request "$PROMPT" 5 > /dev/null &
+
+    if (( i % BATCH_SIZE == 0 )); then
+      wait
+      BATCH_NUM=$((BATCH_NUM + 1))
+      DONE=$((BATCH_NUM * BATCH_SIZE))
+      PCT=$(( DONE * 100 / NUM_REQUESTS ))
+      printf "   ${DIM}[%d/%d]${NC}  %d%% complete  (success=%d  429=%d  errors=%d  tokens=%d)\n" \
+        "$DONE" "$NUM_REQUESTS" "$PCT" "$SUCCESS" "$FAIL_429" "$FAIL_OTHER" "$TOTAL_TOKENS"
+    fi
+  done
+  wait
 fi
 
-# === UNAUTHENTICATED REQUESTS (401) ===
-echo "--- Unauthenticated Requests (expect 401) ---"
 echo ""
-
-make_request "No auth header" "" "401" "Hello"
-make_request "Empty auth header" "" "401" "Hi there"
-
-# === INVALID KEY REQUESTS (403) ===
-echo "--- Invalid Key Requests (expect 403) ---"
+echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${CYAN}║${NC}  ${BOLD}Results${NC}"
+echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-
-make_request "Invalid API key" "invalid-key-12345" "403" "Test invalid"
-make_request "Malformed key" "not-a-valid-key" "403" "Test malformed"
-
-# === AUTHENTICATED REQUESTS (200) ===
-if [[ -n "$API_KEY" ]]; then
-    echo "--- Authenticated Requests (expect 200) ---"
-    echo ""
-    
-    make_request "Simple math question" "$API_KEY" "200" "What is 2+2?"
-    make_request "Code question" "$API_KEY" "200" "Write hello world in Python"
-    make_request "Short question" "$API_KEY" "200" "What is AI?"
-    make_request "Greeting" "$API_KEY" "200" "Hello, how are you?"
-    
-    # === RATE LIMIT TEST (may get 429 if limits are low) ===
-    echo "--- Rapid Fire (may trigger 429) ---"
-    echo ""
-    
-    for i in {1..3}; do
-        log "Rapid request $i"
-        curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST "https://${MAAS_GW}/v1/chat/completions" \
-            -H "Authorization: Bearer $API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"model\": \"${MODEL}\", \"messages\": [{\"role\": \"user\", \"content\": \"Quick $i\"}], \"max_tokens\": 10}" &
-    done
-    wait
-    echo ""
-fi
-
-# === SUMMARY ===
-echo "=========================================="
-echo "  Traffic Generation Complete"
-echo "=========================================="
+echo -e "   ${GREEN}${BOLD}Success (200):${NC}     $SUCCESS"
+echo -e "   ${RED}Unauthorized (401):${NC} $FAIL_401"
+echo -e "   ${YELLOW}Rate Limited (429):${NC} $FAIL_429"
+echo -e "   ${RED}Other Errors:${NC}       $FAIL_OTHER"
+echo -e "   ${BOLD}Total Tokens:${NC}       $TOTAL_TOKENS"
 echo ""
-echo "Requests sent:"
-echo "  - 2x Unauthenticated (401)"
-echo "  - 2x Invalid key (403)"
-if [[ -n "$API_KEY" ]]; then
-    echo "  - 4x Authenticated (200)"
-    echo "  - 3x Rapid fire (200 or 429)"
-fi
-echo ""
-echo "View metrics in RHOAI Dashboard:"
-echo "  https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/observe-and-monitor/dashboard"
+echo -e "   ${DIM}View dashboard: https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com${NC}"
 echo ""
