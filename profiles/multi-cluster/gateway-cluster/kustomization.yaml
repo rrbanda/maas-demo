@@ -23,5 +23,7 @@ resources:
   - ../../../manifests/platform/dsci-patch
   # ServiceMonitors + MonitoringStack patch
   - ../../../manifests/platform/observability
+  # llm-d EPP (Endpoint Picker for intelligent inference routing)
+  - ../../../manifests/llm-d-gateway
   # Multi-cluster load balancing (Cluster 3 vLLM backend)
   - ../../../manifests/multi-cluster-lb

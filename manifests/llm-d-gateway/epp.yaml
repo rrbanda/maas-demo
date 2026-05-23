@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-d-epp
+  namespace: models-as-a-service
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: llm-d-epp
+rules:
+  - apiGroups: ["inference.networking.k8s.io"]
+    resources: ["inferencepools", "inferencepools/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencemodels", "inferencemodels/status", "inferenceobjectives", "inferencepoolimports", "inferencemodelrewrites"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "endpoints", "services", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: llm-d-epp-models-as-a-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: llm-d-epp
+subjects:
+  - kind: ServiceAccount
+    name: llm-d-epp
+    namespace: models-as-a-service
+---
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: gemma2-9b-fp8-pool
+  namespace: models-as-a-service
+spec:
+  targetPorts:
+    - number: 8000
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: llminferenceservice
+  endpointPickerRef:
+    name: llm-d-epp
+    port:
+      number: 9002
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: gemma2-9b-fp8
+  namespace: models-as-a-service
+spec:
+  modelName: gemma2-9b-fp8
+  poolRef:
+    name: gemma2-9b-fp8-pool
+  criticality: Critical
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-d-epp
+  namespace: models-as-a-service
+  labels:
+    app: llm-d-epp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: registry.redhat.io/rhoai/odh-llm-d-inference-scheduler-rhel9@sha256:bddf686d6eaf1a607e1c697f58165d685944607cb4629648f27e56b2884e3de0
+          args:
+            - --pool-name=gemma2-9b-fp8-pool
+            - --pool-namespace=models-as-a-service
+            - --secure-serving=false
+            - --metrics-endpoint-auth=false
+          ports:
+            - containerPort: 9002
+              name: grpc
+            - containerPort: 9003
+              name: health
+            - containerPort: 9090
+              name: metrics
+          livenessProbe:
+            grpc:
+              port: 9003
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 9003
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-d-epp
+  namespace: models-as-a-service
+spec:
+  selector:
+    app: llm-d-epp
+  ports:
+    - name: grpc
+      port: 9002
+      targetPort: 9002
+    - name: health
+      port: 9003
+      targetPort: 9003
+    - name: metrics
+      port: 9090
+      targetPort: 9090
