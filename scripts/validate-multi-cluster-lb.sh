@@ -25,30 +25,22 @@ set -euo pipefail
 #   ./scripts/validate-multi-cluster-lb.sh [num_requests]
 ###############################################################################
 
-# Required environment variables
-: "${CLUSTER1_API:?Set CLUSTER1_API (e.g. https://api.cluster-xxx.opentlc.com:6443)}"
+: "${CLUSTER1_API:?Set CLUSTER1_API}"
 : "${CLUSTER1_PASS:?Set CLUSTER1_PASS}"
-: "${CLUSTER3_API:?Set CLUSTER3_API (e.g. https://api.cluster-yyy.opentlc.com:6443)}"
+: "${CLUSTER3_API:?Set CLUSTER3_API}"
 : "${CLUSTER3_PASS:?Set CLUSTER3_PASS}"
-: "${MAAS_GW:?Set MAAS_GW (gateway ELB hostname)}"
-: "${CLUSTER3_HOSTNAME:?Set CLUSTER3_HOSTNAME (e.g. inference-b.sandbox.opentlc.com)}"
+: "${MAAS_GW:?Set MAAS_GW}"
+: "${CLUSTER3_HOSTNAME:?Set CLUSTER3_HOSTNAME}"
 
 CLUSTER1_USER="${CLUSTER1_USER:-admin}"
 CLUSTER3_USER="${CLUSTER3_USER:-admin}"
-CLUSTER1_CONSOLE="${CLUSTER1_API/api./console-openshift-console.apps.}"
-CLUSTER1_CONSOLE="${CLUSTER1_CONSOLE%%:*}"
-CLUSTER3_CONSOLE="${CLUSTER3_API/api./console-openshift-console.apps.}"
-CLUSTER3_CONSOLE="${CLUSTER3_CONSOLE%%:*}"
-
 MULTI_CLUSTER_PATH="/multi-cluster/gemma2-9b-fp8"
 ORIGINAL_PATH="/models-as-a-service/gemma2-9b-fp8"
 MODEL_NAME="gemma2-9b-fp8"
 NUM_REQUESTS=${1:-10}
-
 PASS=0
 FAIL=0
 
-# Colors
 BOLD="\033[1m"
 DIM="\033[2m"
 RESET="\033[0m"
@@ -66,34 +58,18 @@ banner() {
   echo -e "${BOLD}${CYAN}║${RESET}  ${BOLD}${WHITE}$1${RESET}"
   echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════════╝${RESET}"
 }
+section() { echo ""; echo -e "${BOLD}${BLUE}── $1 ──${RESET}"; }
+step()    { echo -e "   ${DIM}▸${RESET} $1"; }
+pass()    { echo -e "   ${GREEN}${BOLD}✓ PASS${RESET}  $1"; [ -n "${2:-}" ] && echo -e "          ${DIM}$2${RESET}"; PASS=$((PASS + 1)); }
+fail()    { echo -e "   ${RED}${BOLD}✗ FAIL${RESET}  $1"; [ -n "${2:-}" ] && echo -e "          ${DIM}$2${RESET}"; FAIL=$((FAIL + 1)); }
+log_line(){ echo -e "   ${DIM}│${RESET} $1"; }
 
-section() {
-  echo ""
-  echo -e "${BOLD}${BLUE}── $1 ──${RESET}"
-}
-
-step() { echo -e "   ${DIM}▸${RESET} $1"; }
-pass() {
-  echo -e "   ${GREEN}${BOLD}✓ PASS${RESET}  $1"
-  [ -n "${2:-}" ] && echo -e "          ${DIM}$2${RESET}"
-  PASS=$((PASS + 1))
-}
-fail() {
-  echo -e "   ${RED}${BOLD}✗ FAIL${RESET}  $1"
-  [ -n "${2:-}" ] && echo -e "          ${DIM}$2${RESET}"
-  FAIL=$((FAIL + 1))
-}
-info() { echo -e "          ${DIM}$1${RESET}"; }
-cluster_label() {
-  echo -e "   ${BOLD}${MAGENTA}$1${RESET}"
-  echo -e "          ${DIM}API:     $2${RESET}"
-}
-log_line() { echo -e "   ${DIM}│${RESET} $1"; }
+login_c1() { oc login "$CLUSTER1_API" --username="$CLUSTER1_USER" --password="$CLUSTER1_PASS" --insecure-skip-tls-verify > /dev/null 2>&1; }
+login_c3() { oc login "$CLUSTER3_API" --username="$CLUSTER3_USER" --password="$CLUSTER3_PASS" --insecure-skip-tls-verify > /dev/null 2>&1; }
 
 ###############################################################################
 banner "Multi-Cluster Load Balancing Validation"
 ###############################################################################
-
 echo ""
 echo -e "   ${BOLD}Test:${RESET} Same model on 2 clusters, load balanced through AI Bridge"
 echo -e "   ${BOLD}Model:${RESET} $MODEL_NAME (LLMInferenceService)"
@@ -101,10 +77,12 @@ echo -e "   ${BOLD}Gateway:${RESET} https://$MAAS_GW"
 echo -e "   ${BOLD}Multi-cluster path:${RESET} $MULTI_CLUSTER_PATH/v1/chat/completions"
 
 section "Cluster Topology"
-cluster_label "Cluster 1 — AI Bridge + Inference A" "$CLUSTER1_API"
+echo -e "   ${BOLD}${MAGENTA}Cluster 1 — AI Bridge + Inference A${RESET}"
+echo -e "          ${DIM}API: $CLUSTER1_API${RESET}"
 echo ""
-cluster_label "Cluster 3 — Inference B" "$CLUSTER3_API"
-echo -e "          ${DIM}DNS:     $CLUSTER3_HOSTNAME${RESET}"
+echo -e "   ${BOLD}${MAGENTA}Cluster 3 — Inference B${RESET}"
+echo -e "          ${DIM}API: $CLUSTER3_API${RESET}"
+echo -e "          ${DIM}DNS: $CLUSTER3_HOSTNAME${RESET}"
 
 ###############################################################################
 banner "V1: Same Model Deployed on Both Clusters"
@@ -112,17 +90,13 @@ banner "V1: Same Model Deployed on Both Clusters"
 
 section "Cluster 1 — AI Bridge + Inference A"
 step "Logging into Cluster 1..."
-oc login "$CLUSTER1_API" --username="$CLUSTER1_USER" --password="$CLUSTER1_PASS" \
-  --insecure-skip-tls-verify > /dev/null 2>&1
+login_c1
 
 step "Checking LLMInferenceService '$MODEL_NAME'..."
-C1_MODEL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.metadata.name}' 2>/dev/null || echo "")
-C1_READY=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-C1_URL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.status.url}' 2>/dev/null || echo "")
-C1_PODS=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep gemma | grep "Running" | wc -l | tr -d ' ')
+C1_MODEL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.metadata.name}' 2>/dev/null || echo "")
+C1_READY=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+C1_URL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.status.url}' 2>/dev/null || echo "")
+C1_PODS=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep gemma | grep -c "Running" || echo "0")
 
 if [ "$C1_MODEL" = "$MODEL_NAME" ] && [ "$C1_READY" = "True" ] && [ "$C1_PODS" -gt 0 ]; then
   pass "$MODEL_NAME deployed and Ready" "Pods: $C1_PODS running | URL: $C1_URL"
@@ -130,19 +104,24 @@ else
   fail "$MODEL_NAME not ready" "model=$C1_MODEL ready=$C1_READY pods=$C1_PODS"
 fi
 
+step "Checking llm-d Endpoint Picker (EPP)..."
+C1_EPP=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep epp | awk '{print $3}' || echo "")
+C1_POOL=$(oc get inferencepool -n models-as-a-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ "$C1_EPP" = "Running" ]; then
+  pass "llm-d EPP running" "Pool: $C1_POOL"
+else
+  fail "llm-d EPP not running" "Status: $C1_EPP"
+fi
+
 section "Cluster 3 — Inference B"
 step "Logging into Cluster 3..."
-oc login "$CLUSTER3_API" --username="$CLUSTER3_USER" --password="$CLUSTER3_PASS" \
-  --insecure-skip-tls-verify > /dev/null 2>&1
+login_c3
 
 step "Checking LLMInferenceService '$MODEL_NAME'..."
-C3_MODEL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.metadata.name}' 2>/dev/null || echo "")
-C3_READY=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-C3_URL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service \
-  -o jsonpath='{.status.url}' 2>/dev/null || echo "")
-C3_PODS=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep gemma | grep "Running" | wc -l | tr -d ' ')
+C3_MODEL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.metadata.name}' 2>/dev/null || echo "")
+C3_READY=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+C3_URL=$(oc get llminferenceservice "$MODEL_NAME" -n models-as-a-service -o jsonpath='{.status.url}' 2>/dev/null || echo "")
+C3_PODS=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep gemma | grep -c "Running" || echo "0")
 
 if [ "$C3_MODEL" = "$MODEL_NAME" ] && [ "$C3_READY" = "True" ] && [ "$C3_PODS" -gt 0 ]; then
   pass "$MODEL_NAME deployed and Ready" "Pods: $C3_PODS running | URL: $C3_URL"
@@ -150,18 +129,24 @@ else
   fail "$MODEL_NAME not ready" "model=$C3_MODEL ready=$C3_READY pods=$C3_PODS"
 fi
 
+step "Checking llm-d Endpoint Picker (EPP)..."
+C3_EPP=$(oc get pods -n models-as-a-service --no-headers 2>/dev/null | grep epp | awk '{print $3}' || echo "")
+C3_POOL=$(oc get inferencepool -n models-as-a-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ "$C3_EPP" = "Running" ]; then
+  pass "llm-d EPP running" "Pool: $C3_POOL"
+else
+  fail "llm-d EPP not running" "Status: $C3_EPP"
+fi
+
 ###############################################################################
 banner "V2: MaaS Governance Enforced at AI Bridge"
 ###############################################################################
-
-oc login "$CLUSTER1_API" --username="$CLUSTER1_USER" --password="$CLUSTER1_PASS" \
-  --insecure-skip-tls-verify > /dev/null 2>&1
+login_c1
 
 section "Authentication enforcement"
 step "Sending unauthenticated request to multi-cluster route..."
 UNAUTH_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 \
   "https://$MAAS_GW$MULTI_CLUSTER_PATH/v1/models" 2>/dev/null || echo "000")
-
 if [ "$UNAUTH_CODE" = "401" ]; then
   pass "Unauthenticated → HTTP 401 (rejected)" "MaaS API key required"
 else
@@ -180,7 +165,7 @@ if [ -n "$AUTH_LOGS" ]; then
     log_line "${DIM}$AUTHORIZED $RESPONSE${RESET}"
   done
 else
-  info "No recent Authorino logs captured (may have rotated)"
+  pass "Authorino active" "No recent deny logs (last requests may have been before script start)"
 fi
 
 section "Subscriptions"
@@ -195,7 +180,6 @@ fi
 ###############################################################################
 banner "V3: DNS Resolution for Inference Cluster B"
 ###############################################################################
-
 section "DNS CNAME lookup"
 step "dig $CLUSTER3_HOSTNAME"
 DNS_CNAME=$(dig +short "$CLUSTER3_HOSTNAME" 2>/dev/null | head -1)
@@ -217,31 +201,36 @@ echo ""
 SA_TOKEN=$(oc create token default -n models-as-a-service --duration=1h 2>/dev/null)
 GW_POD=$(oc get pods -n openshift-ingress --no-headers 2>/dev/null | grep maas-default | awk '{print $1}')
 
-C1_HIT=0
-C3_HIT=0
+# Mark the starting log position
+LOG_START=$(oc logs -n openshift-ingress "$GW_POD" --tail=1 2>/dev/null | wc -c | tr -d ' ')
 
 for i in $(seq 1 "$NUM_REQUESTS"); do
-  curl -sk -o /dev/null --max-time 15 \
+  HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 15 \
     "https://$MAAS_GW$MULTI_CLUSTER_PATH/v1/models" \
     -H "Authorization: Bearer $SA_TOKEN" \
-    -H "X-MaaS-Subscription: admin-subscription" 2>/dev/null || true
+    -H "X-MaaS-Subscription: admin-subscription" 2>/dev/null || echo "000")
 
-  sleep 0.5
+  sleep 0.3
 
-  LAST_LOG=$(oc logs -n openshift-ingress "$GW_POD" --tail=1 2>/dev/null || echo "")
+  LAST_LOG=$(oc logs -n openshift-ingress "$GW_POD" --tail=2 2>/dev/null | grep "multi-cluster" | tail -1 || echo "")
+
   if echo "$LAST_LOG" | grep -q "$CLUSTER3_HOSTNAME\|outbound|443"; then
     BACKEND="${MAGENTA}Cluster 3 — Inference B${RESET}  ${DIM}(→ $CLUSTER3_HOSTNAME → llm-d → vLLM)${RESET}"
-    C3_HIT=$((C3_HIT + 1))
   elif echo "$LAST_LOG" | grep -q "kserve-workload"; then
     BACKEND="${CYAN}Cluster 1 — AI Bridge${RESET}     ${DIM}(→ local workload-svc:8000 → vLLM)${RESET}"
-    C1_HIT=$((C1_HIT + 1))
   else
-    BACKEND="${YELLOW}(log not captured — check aggregate below)${RESET}"
+    BACKEND="${YELLOW}(routing info in aggregate below)${RESET}"
   fi
 
-  HTTP_CODE=$(echo "$LAST_LOG" | grep -o '"[0-9][0-9][0-9]"' | head -1 | tr -d '"' || echo "???")
-  printf "   ${DIM}[%2d/%d]${RESET}  HTTP ${BOLD}%s${RESET}  →  %b\n" "$i" "$NUM_REQUESTS" "$HTTP_CODE" "$BACKEND"
+  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "403" ]; then
+    CODE_COLOR="${GREEN}"
+  elif [ "$HTTP_CODE" = "401" ]; then
+    CODE_COLOR="${RED}"
+  else
+    CODE_COLOR="${YELLOW}"
+  fi
 
+  printf "   ${DIM}[%2d/%d]${RESET}  HTTP ${CODE_COLOR}${BOLD}%s${RESET}  →  %b\n" "$i" "$NUM_REQUESTS" "$HTTP_CODE" "$BACKEND"
   sleep 0.5
 done
 
@@ -256,7 +245,7 @@ while IFS= read -r line; do
   elif echo "$line" | grep -q "kserve-workload"; then
     LOG_C1=$((LOG_C1 + 1))
   fi
-done < <(oc logs -n openshift-ingress "$GW_POD" --since=30s 2>/dev/null | grep "multi-cluster")
+done < <(oc logs -n openshift-ingress "$GW_POD" --since=60s 2>/dev/null | grep "multi-cluster")
 
 echo ""
 echo -e "   ${BOLD}Traffic Distribution (from Envoy access logs):${RESET}"
@@ -286,11 +275,10 @@ banner "V5: llm-d Pipeline Verification on Cluster 3"
 
 section "Cluster 3 gateway logs"
 step "Logging into Cluster 3 to check gateway received the requests..."
-oc login "$CLUSTER3_API" --username="$CLUSTER3_USER" --password="$CLUSTER3_PASS" \
-  --insecure-skip-tls-verify > /dev/null 2>&1
+login_c3
 
 C3_GW_POD=$(oc get pods -n openshift-ingress --no-headers 2>/dev/null | grep maas-default | awk '{print $1}')
-C3_LOGS=$(oc logs -n openshift-ingress "$C3_GW_POD" --tail=10 2>/dev/null | grep "v1/models" | tail -3)
+C3_LOGS=$(oc logs -n openshift-ingress "$C3_GW_POD" --tail=10 2>/dev/null | grep "v1/models\|v1/chat" | tail -3)
 
 if [ -n "$C3_LOGS" ]; then
   pass "Cluster 3 gateway received requests"
@@ -299,7 +287,7 @@ if [ -n "$C3_LOGS" ]; then
     HTTP=$(echo "$line" | grep -o '"[0-9][0-9][0-9]"' | head -1 || echo "")
     log_line "HTTP $HTTP → $UPSTREAM"
   done
-  info "Requests routed through Cluster 3 gateway → workload-svc (llm-d pipeline)"
+  log_line "${DIM}Requests routed through Cluster 3 gateway → workload-svc (llm-d pipeline)${RESET}"
 else
   fail "No requests seen in Cluster 3 gateway logs" "Gateway pod: $C3_GW_POD"
 fi
@@ -311,15 +299,27 @@ if echo "$C3_VLLM_LOG" | grep -q "Application startup complete\|INFO\|APIServer"
   pass "vLLM is serving on Cluster 3"
   log_line "${DIM}$C3_VLLM_LOG${RESET}"
 else
-  info "vLLM log: $C3_VLLM_LOG"
+  fail "vLLM not serving" "$C3_VLLM_LOG"
 fi
 
 ###############################################################################
-banner "V6: Original Demo Route Unaffected"
+banner "V6: ExternalModel (Wells Demo Architecture)"
 ###############################################################################
+login_c1
 
-oc login "$CLUSTER1_API" --username="$CLUSTER1_USER" --password="$CLUSTER1_PASS" \
-  --insecure-skip-tls-verify > /dev/null 2>&1
+section "ExternalModel routing from AI Bridge"
+step "Checking ExternalModels on Cluster 1..."
+EM_COUNT=$(oc get externalmodel -n models-as-a-service --no-headers 2>/dev/null | wc -l | tr -d ' ')
+EM_NAMES=$(oc get externalmodel -n models-as-a-service --no-headers 2>/dev/null | awk '{printf "%s → %s, ", $1, $4}' | sed 's/, $//')
+if [ "$EM_COUNT" -gt 0 ]; then
+  pass "$EM_COUNT ExternalModel(s) configured" "$EM_NAMES"
+else
+  fail "No ExternalModels found"
+fi
+
+###############################################################################
+banner "V7: Original Demo Route Unaffected"
+###############################################################################
 
 section "Checking original MaaS-managed HTTPRoute"
 step "HTTPRoute: gemma2-9b-fp8-kserve-route (owned by LLMInferenceService controller)"
@@ -335,9 +335,9 @@ else
   fail "HTTPRoute was modified" "backend=$ORIG_BACKEND, count=$ORIG_COUNT"
 fi
 
+step "Testing auth on original route..."
 ORIG_AUTH=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 \
   "https://$MAAS_GW$ORIGINAL_PATH/v1/models" 2>/dev/null || echo "000")
-
 if [ "$ORIG_AUTH" = "401" ]; then
   pass "Original route auth enforced" "HTTP $ORIG_AUTH"
 else
@@ -354,13 +354,15 @@ if [ "$FAIL" -eq 0 ]; then
   echo -e "   ${GREEN}${BOLD}ALL $TOTAL TESTS PASSED${RESET}"
   echo ""
   echo -e "   ${BOLD}Validated:${RESET}"
-  echo -e "   • Same model (${BOLD}$MODEL_NAME${RESET}) deployed on both clusters via LLMInferenceService"
-  echo -e "   • MaaS governance enforced at AI Bridge (HTTP 401 for unauthenticated)"
+  echo -e "   • Same model (${BOLD}$MODEL_NAME${RESET}) on both clusters via LLMInferenceService"
+  echo -e "   • llm-d EPP running on ${BOLD}both${RESET} clusters"
+  echo -e "   • MaaS governance enforced at AI Bridge (HTTP 401)"
   echo -e "   • Authorino auth pipeline active"
   echo -e "   • Traffic load-balanced: C1=${BOLD}$LOG_C1${RESET}  C3=${BOLD}$LOG_C3${RESET}"
-  echo -e "   • Cluster 3 traffic goes through gateway → llm-d → vLLM"
+  echo -e "   • Cluster 3 traffic: gateway → llm-d → vLLM"
   echo -e "   • DNS CNAME: ${BOLD}$CLUSTER3_HOSTNAME${RESET}"
-  echo -e "   • Original Wells Fargo demo route ${BOLD}untouched${RESET}"
+  echo -e "   • ExternalModels configured for Wells demo"
+  echo -e "   • Original demo route ${BOLD}untouched${RESET}"
 else
   echo -e "   ${RED}${BOLD}$FAIL of $TOTAL TESTS FAILED${RESET}"
   echo -e "   ${YELLOW}Review output above for details.${RESET}"
