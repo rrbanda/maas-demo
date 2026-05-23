@@ -54,3 +54,21 @@ spec:
     authentication:
       anonymous:
         anonymous: {}
+---
+# Passthrough Route for direct vLLM access from AI Bridge ExternalModel
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: gemma2-9b-fp8-inference
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  to:
+    kind: Service
+    name: gemma2-9b-fp8-kserve-workload-svc
+    weight: 100
+  port:
+    targetPort: 8000
+  tls:
+    termination: passthrough
