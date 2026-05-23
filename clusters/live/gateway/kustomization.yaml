@@ -50,18 +50,18 @@ patches:
     patch: |-
       - op: replace
         path: /spec/hosts/0
-        value: a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com
+        value: ac3b790d52fe041bc99d1bc5d4adc807-2089034592.us-east-2.elb.amazonaws.com
   - target:
       kind: DestinationRule
       name: gemma-cluster3-tls
     patch: |-
       - op: replace
         path: /spec/host
-        value: a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com
+        value: ac3b790d52fe041bc99d1bc5d4adc807-2089034592.us-east-2.elb.amazonaws.com
   - target:
       kind: Service
       name: gemma2-9b-fp8-cluster3
     patch: |-
       - op: replace
         path: /spec/externalName
-        value: a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com
+        value: ac3b790d52fe041bc99d1bc5d4adc807-2089034592.us-east-2.elb.amazonaws.com
