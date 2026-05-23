@@ -1,0 +1,56 @@
+# HTTPRoute for direct /v1/* access on the inference cluster.
+# Allows the AI Bridge to send requests with rewritten paths (/v1/chat/completions)
+# directly through the inference cluster's gateway → llm-d → vLLM.
+# The AI Bridge handles all MaaS governance; this route needs no auth.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gemma-direct-v1-route
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  parentRefs:
+    - name: maas-default-gateway
+      namespace: openshift-ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+      backendRefs:
+        - name: gemma2-9b-fp8-kserve-workload-svc
+          port: 8000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/completions
+      backendRefs:
+        - name: gemma2-9b-fp8-kserve-workload-svc
+          port: 8000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/models
+      backendRefs:
+        - name: gemma2-9b-fp8-kserve-workload-svc
+          port: 8000
+---
+# Anonymous AuthPolicy so the AI Bridge can send governed requests
+# without needing a second API key on the inference cluster.
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  name: gemma-direct-v1-allow
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: gemma-direct-v1-route
+  rules:
+    authentication:
+      anonymous:
+        anonymous: {}

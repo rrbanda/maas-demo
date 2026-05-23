@@ -229,7 +229,7 @@ for i in $(seq 1 "$NUM_REQUESTS"); do
   sleep 0.5
 
   LAST_LOG=$(oc logs -n openshift-ingress "$GW_POD" --tail=1 2>/dev/null || echo "")
-  if echo "$LAST_LOG" | grep -q "$CLUSTER3_HOSTNAME"; then
+  if echo "$LAST_LOG" | grep -q "$CLUSTER3_HOSTNAME\|outbound|443"; then
     BACKEND="${MAGENTA}Cluster 3 — Inference B${RESET}  ${DIM}(→ $CLUSTER3_HOSTNAME → llm-d → vLLM)${RESET}"
     C3_HIT=$((C3_HIT + 1))
   elif echo "$LAST_LOG" | grep -q "kserve-workload"; then
@@ -251,7 +251,7 @@ step "Analyzing Envoy access logs from: $GW_POD"
 LOG_C1=0
 LOG_C3=0
 while IFS= read -r line; do
-  if echo "$line" | grep -q "$CLUSTER3_HOSTNAME"; then
+  if echo "$line" | grep -q "$CLUSTER3_HOSTNAME\|outbound|443"; then
     LOG_C3=$((LOG_C3 + 1))
   elif echo "$line" | grep -q "kserve-workload"; then
     LOG_C1=$((LOG_C1 + 1))

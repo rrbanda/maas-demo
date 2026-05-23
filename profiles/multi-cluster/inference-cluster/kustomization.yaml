@@ -19,3 +19,5 @@ resources:
   - ../../../manifests/guardrails
   # OIDC
   - ../../../manifests/oidc
+  # Multi-cluster LB: /v1/ route with anonymous auth for AI Bridge access
+  - ../../../manifests/multi-cluster-lb-inference
