@@ -1,18 +1,17 @@
-# ServiceEntry declares Cluster 3's vLLM LoadBalancer as an external mesh service.
-# This enables Istio on Cluster 1 to route traffic to Cluster 3's gemma2-9b-fp8 vLLM.
 apiVersion: networking.istio.io/v1
 kind: ServiceEntry
 metadata:
+  labels:
+    app.kubernetes.io/instance: maas-demo-gateway
+    app.kubernetes.io/part-of: multi-cluster-lb
   name: gemma-cluster3-vllm
   namespace: models-as-a-service
-  labels:
-    app.kubernetes.io/part-of: multi-cluster-lb
 spec:
   hosts:
-    - REPLACE_WITH_CLUSTER3_VLLM_HOST
+  - inference-b.sandbox2582.opentlc.com
   location: MESH_EXTERNAL
   ports:
-    - number: 443
-      name: https
-      protocol: HTTPS
+  - name: https
+    number: 443
+    protocol: HTTPS
   resolution: DNS

@@ -1,15 +1,14 @@
-# DestinationRule configures TLS origination for Cluster 3's vLLM endpoint.
-# insecureSkipVerify is required because vLLM uses a self-signed KServe certificate.
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
+  labels:
+    app.kubernetes.io/instance: maas-demo-gateway
+    app.kubernetes.io/part-of: multi-cluster-lb
   name: gemma-cluster3-tls
   namespace: models-as-a-service
-  labels:
-    app.kubernetes.io/part-of: multi-cluster-lb
 spec:
-  host: REPLACE_WITH_CLUSTER3_VLLM_HOST
+  host: inference-b.sandbox2582.opentlc.com
   trafficPolicy:
     tls:
-      mode: SIMPLE
       insecureSkipVerify: true
+      mode: SIMPLE
