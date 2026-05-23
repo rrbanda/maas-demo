@@ -4,3 +4,8 @@ resources:
   - service-entry.yaml
   - destination-rule.yaml
   - external-service.yaml
+  - service-entry-gateway-ns.yaml
+  - destination-rule-gateway-ns.yaml
+  - httproute.yaml
+  - authpolicy.yaml
+  - token-rate-limit-policy.yaml

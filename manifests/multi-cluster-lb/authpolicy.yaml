@@ -1,0 +1,236 @@
+apiVersion: kuadrant.io/v1
+kind: AuthPolicy
+metadata:
+  labels:
+    app.kubernetes.io/component: auth-policy
+    app.kubernetes.io/managed-by: maas-controller
+    app.kubernetes.io/part-of: multi-cluster-lb
+    maas.opendatahub.io/model: gemma2-9b-fp8
+  name: maas-auth-gemma-multi-cluster
+  namespace: models-as-a-service
+spec:
+  rules:
+    authentication:
+      api-keys:
+        metrics: false
+        plain:
+          selector: request.headers.authorization
+        priority: 0
+        when:
+        - operator: matches
+          selector: request.headers.authorization
+          value: ^Bearer sk-oai-.*
+      kubernetes-tokens:
+        kubernetesTokenReview:
+          audiences:
+          - https://kubernetes.default.svc
+        metrics: false
+        priority: 1
+        when:
+        - operator: matches
+          selector: request.url_path
+          value: .*/v1/models$
+        - operator: neq
+          selector: request.headers.authorization
+          value: ''
+      oidc-identities:
+        jwt:
+          issuerUrl: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
+        metrics: false
+        priority: 2
+        when:
+        - operator: matches
+          selector: request.url_path
+          value: .*/v1/models$
+        - predicate: '!request.headers.authorization.startsWith("Bearer sk-oai-")
+            && request.headers.authorization.matches("^Bearer [^.]+\\.[^.]+\\.[^.]+$")'
+    authorization:
+      auth-valid:
+        cache:
+          key:
+            selector: '(has(auth.metadata.apiKeyValidation) ? "api-key|" + request.headers.authorization.replace("Bearer
+              ", "") : (has(auth.identity.sub) ? "oidc|" + auth.identity.sub : "k8s-token|"
+              + auth.identity.user.username)) + "|models-as-a-service/gemma2-9b-fp8"'
+          ttl: 60
+        metrics: false
+        opa:
+          allValues: false
+          rego: "# API key authentication: validate the key\nallow {\n  object.get(input.auth.metadata,\
+            \ \"apiKeyValidation\", {})\n  input.auth.metadata.apiKeyValidation.valid\
+            \ == true\n}\n\n# Kubernetes token authentication: check identity exists\n\
+            allow {\n  object.get(input.auth.identity, \"user\", {}).username != \"\
+            \"\n}\n\n# OIDC token authentication: check JWT subject exists\nallow\
+            \ {\n  object.get(input.auth.identity, \"sub\", \"\") != \"\"\n}"
+        priority: 0
+      require-group-membership:
+        cache:
+          key:
+            selector: '((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.userId : (has(auth.identity.preferred_username)
+              ? auth.identity.preferred_username : (has(auth.identity.sub) ? auth.identity.sub
+              : auth.identity.user.username))) + "|" + ((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.groups : (has(auth.identity.groups)
+              ? auth.identity.groups : auth.identity.user.groups)).join(",") + "|models-as-a-service/gemma2-9b-fp8"'
+          ttl: 60
+        metrics: false
+        opa:
+          allValues: false
+          rego: "\n# Allowed groups and users from all MaaSAuthPolicies\nallowed_groups\
+            \ := [\"system:authenticated\",\"system:authenticated:oauth\"]\nallowed_users\
+            \ := [\"admin\"]\n\n# Extract username from API key, OIDC, or K8s token\n\
+            username := input.auth.metadata.apiKeyValidation.username\n    { object.get(input.auth,\
+            \ \"metadata\", {}).apiKeyValidation.username != \"\" }\nelse := input.auth.identity.preferred_username\n\
+            \    { object.get(input.auth, \"identity\", {}).preferred_username !=\
+            \ \"\" }\nelse := input.auth.identity.sub\n    { object.get(input.auth,\
+            \ \"identity\", {}).sub != \"\" }\nelse := input.auth.identity.user.username\n\
+            \    { object.get(input.auth, \"identity\", {}).user.username != \"\"\
+            \ }\nelse := \"\"\n\n# Extract groups from API key, OIDC, or K8s token\n\
+            groups := input.auth.metadata.apiKeyValidation.groups\n    { object.get(input.auth,\
+            \ \"metadata\", {}).apiKeyValidation.groups != [] }\nelse := input.auth.identity.groups\n\
+            \    { object.get(input.auth, \"identity\", {}).groups != [] }\nelse :=\
+            \ input.auth.identity.user.groups\n    { object.get(input.auth, \"identity\"\
+            , {}).user.groups != [] }\nelse := []\n\n# Allow if user is in allowed\
+            \ users\nallow {\n    username == allowed_users[_]\n}\n\n# Allow if any\
+            \ user group is in allowed groups\nallow {\n    groups[_] == allowed_groups[_]\n\
+            }\n"
+        priority: 0
+      subscription-valid:
+        cache:
+          key:
+            selector: '((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.userId : (has(auth.identity.preferred_username)
+              ? auth.identity.preferred_username : (has(auth.identity.sub) ? auth.identity.sub
+              : auth.identity.user.username))) + "|" + ((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.groups : (has(auth.identity.groups)
+              ? auth.identity.groups : auth.identity.user.groups)).join(",") + "|"
+              + ((has(auth.metadata) && has(auth.metadata.apiKeyValidation)) ? auth.metadata.apiKeyValidation.subscription
+              : ("x-maas-subscription" in request.headers ? request.headers["x-maas-subscription"]
+              : "")) + "|models-as-a-service/gemma2-9b-fp8"'
+          ttl: 60
+        metrics: false
+        opa:
+          allValues: false
+          rego: "allow {\n\t# Subscription name must be present (selector succeeded)\n\
+            \tobject.get(input.auth.metadata[\"subscription-info\"], \"name\", \"\"\
+            ) != \"\"\n\t# Error field must be empty (no validation errors from selector)\n\
+            \tobject.get(input.auth.metadata[\"subscription-info\"], \"error\", \"\
+            \") == \"\"\n\t# Allowlist: phase must be exactly \"Active\" or \"Degraded\"\
+            \ (reject empty/unreconciled)\n\tphase := object.get(input.auth.metadata[\"\
+            subscription-info\"], \"phase\", \"\")\n\tany([phase == \"Active\", phase\
+            \ == \"Degraded\"])\n\t# Subscription must not be deleting\n\tobject.get(input.auth.metadata[\"\
+            subscription-info\"], \"deletionTimestamp\", \"\") == \"\"\n}"
+        priority: 0
+    metadata:
+      apiKeyValidation:
+        cache:
+          key:
+            selector: request.headers.authorization.replace("Bearer ", "")
+          ttl: 60
+        http:
+          body:
+            expression: '{"key": request.headers.authorization.replace("Bearer ",
+              "")}'
+          contentType: application/json
+          method: POST
+          url: https://maas-api.redhat-ods-applications.svc.cluster.local:8443/internal/v1/api-keys/validate
+        metrics: false
+        priority: 0
+        when:
+        - operator: matches
+          selector: request.headers.authorization
+          value: ^Bearer sk-oai-.*
+      subscription-info:
+        cache:
+          key:
+            selector: '((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.userId : (has(auth.identity.preferred_username)
+              ? auth.identity.preferred_username : (has(auth.identity.sub) ? auth.identity.sub
+              : auth.identity.user.username))) + "|" + ((has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+              ? auth.metadata.apiKeyValidation.groups : (has(auth.identity.groups)
+              ? auth.identity.groups : auth.identity.user.groups)).join(",") + "|"
+              + ((has(auth.metadata) && has(auth.metadata.apiKeyValidation)) ? auth.metadata.apiKeyValidation.subscription
+              : ("x-maas-subscription" in request.headers ? request.headers["x-maas-subscription"]
+              : "")) + "|models-as-a-service/gemma2-9b-fp8"'
+          ttl: 60
+        http:
+          body:
+            expression: "{\n  \"groups\": (has(auth.metadata) && has(auth.metadata.apiKeyValidation))\
+              \ ? auth.metadata.apiKeyValidation.groups : (has(auth.identity.groups)\
+              \ ? auth.identity.groups : auth.identity.user.groups),\n  \"username\"\
+              : (has(auth.metadata) && has(auth.metadata.apiKeyValidation)) ? auth.metadata.apiKeyValidation.username\
+              \ : (has(auth.identity.preferred_username) ? auth.identity.preferred_username\
+              \ : (has(auth.identity.sub) ? auth.identity.sub : auth.identity.user.username)),\n\
+              \  \"requestedSubscription\": (has(auth.metadata) && has(auth.metadata.apiKeyValidation))\
+              \ ? auth.metadata.apiKeyValidation.subscription : (\"x-maas-subscription\"\
+              \ in request.headers ? request.headers[\"x-maas-subscription\"] : \"\
+              \"),\n  \"requestedModel\": \"models-as-a-service/gemma2-9b-fp8\"\n}"
+          contentType: application/json
+          method: POST
+          url: https://maas-api.redhat-ods-applications.svc.cluster.local:8443/internal/v1/subscriptions/select
+        metrics: false
+        priority: 1
+    response:
+      success:
+        filters:
+          identity:
+            json:
+              properties:
+                groups:
+                  expression: auth.metadata.apiKeyValidation.groups
+                groups_str:
+                  expression: auth.metadata.apiKeyValidation.groups.join(",")
+                keyId:
+                  selector: auth.metadata.apiKeyValidation.keyId
+                selected_subscription:
+                  expression: 'has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"].name
+                    : ""'
+                selected_subscription_key:
+                  expression: 'has(auth.metadata["subscription-info"].namespace) &&
+                    has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"].namespace
+                    + "/" + auth.metadata["subscription-info"].name + "@models-as-a-service/gemma2-9b-fp8"
+                    : ""'
+                subscription_error:
+                  expression: 'has(auth.metadata["subscription-info"].error) ? auth.metadata["subscription-info"].error
+                    : ""'
+                subscription_error_message:
+                  expression: 'has(auth.metadata["subscription-info"].message) ? auth.metadata["subscription-info"].message
+                    : ""'
+                subscription_info:
+                  expression: 'has(auth.metadata["subscription-info"].name) ? auth.metadata["subscription-info"]
+                    : {}'
+                userid:
+                  selector: auth.metadata.apiKeyValidation.username
+            metrics: true
+            priority: 0
+        headers:
+          Authorization:
+            key: authorization
+            metrics: false
+            plain:
+              value: ''
+            priority: 0
+          X-MaaS-Subscription:
+            metrics: false
+            plain:
+              expression: '(has(auth.metadata) && has(auth.metadata.apiKeyValidation))
+                ? auth.metadata.apiKeyValidation.subscription : ""'
+            priority: 0
+      unauthenticated:
+        code: 401
+        message:
+          value: Authentication required
+      unauthorized:
+        body:
+          expression: 'has(auth.metadata["subscription-info"].message) ? auth.metadata["subscription-info"].message
+            : "Access denied"'
+        code: 403
+        headers:
+          content-type:
+            value: text/plain
+          x-ext-auth-reason:
+            expression: 'has(auth.metadata["subscription-info"].error) ? auth.metadata["subscription-info"].error
+              : "unauthorized"'
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: gemma-multi-cluster-route

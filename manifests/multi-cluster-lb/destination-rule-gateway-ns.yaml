@@ -1,0 +1,17 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: '{"apiVersion":"networking.istio.io/v1","kind":"DestinationRule","metadata":{"annotations":{},"labels":{"app.kubernetes.io/part-of":"multi-cluster-lb"},"name":"gemma-cluster3-tls","namespace":"openshift-ingress"},"spec":{"host":"a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com","trafficPolicy":{"tls":{"insecureSkipVerify":true,"mode":"SIMPLE"}}}}
+
+      '
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+  name: gemma-cluster3-tls
+  namespace: openshift-ingress
+spec:
+  host: a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com
+  trafficPolicy:
+    tls:
+      insecureSkipVerify: true
+      mode: SIMPLE

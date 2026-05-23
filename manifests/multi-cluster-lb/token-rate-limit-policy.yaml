@@ -1,0 +1,17 @@
+apiVersion: kuadrant.io/v1alpha1
+kind: TokenRateLimitPolicy
+metadata:
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+  name: maas-trlp-gemma-multi-cluster
+  namespace: models-as-a-service
+spec:
+  limits:
+    global:
+      rates:
+      - limit: 1000000
+        window: 1h
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: gemma-multi-cluster-route
