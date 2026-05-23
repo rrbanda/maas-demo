@@ -16,34 +16,17 @@ spec:
         plain:
           selector: request.headers.authorization
         priority: 0
-        when:
-        - operator: matches
-          selector: request.headers.authorization
-          value: ^Bearer sk-oai-.*
       kubernetes-tokens:
         kubernetesTokenReview:
           audiences:
           - https://kubernetes.default.svc
         metrics: false
         priority: 1
-        when:
-        - operator: matches
-          selector: request.url_path
-          value: .*/v1/models$
-        - operator: neq
-          selector: request.headers.authorization
-          value: ''
       oidc-identities:
         jwt:
           issuerUrl: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
         metrics: false
         priority: 2
-        when:
-        - operator: matches
-          selector: request.url_path
-          value: .*/v1/models$
-        - predicate: '!request.headers.authorization.startsWith("Bearer sk-oai-")
-            && request.headers.authorization.matches("^Bearer [^.]+\\.[^.]+\\.[^.]+$")'
     authorization:
       auth-valid:
         cache:
@@ -76,23 +59,22 @@ spec:
         opa:
           allValues: false
           rego: "\n# Allowed groups and users from all MaaSAuthPolicies\nallowed_groups\
-            \ := [\"system:authenticated\",\"system:authenticated:oauth\"]\nallowed_users\
-            \ := [\"admin\"]\n\n# Extract username from API key, OIDC, or K8s token\n\
-            username := input.auth.metadata.apiKeyValidation.username\n    { object.get(input.auth,\
-            \ \"metadata\", {}).apiKeyValidation.username != \"\" }\nelse := input.auth.identity.preferred_username\n\
-            \    { object.get(input.auth, \"identity\", {}).preferred_username !=\
-            \ \"\" }\nelse := input.auth.identity.sub\n    { object.get(input.auth,\
-            \ \"identity\", {}).sub != \"\" }\nelse := input.auth.identity.user.username\n\
-            \    { object.get(input.auth, \"identity\", {}).user.username != \"\"\
-            \ }\nelse := \"\"\n\n# Extract groups from API key, OIDC, or K8s token\n\
-            groups := input.auth.metadata.apiKeyValidation.groups\n    { object.get(input.auth,\
-            \ \"metadata\", {}).apiKeyValidation.groups != [] }\nelse := input.auth.identity.groups\n\
-            \    { object.get(input.auth, \"identity\", {}).groups != [] }\nelse :=\
-            \ input.auth.identity.user.groups\n    { object.get(input.auth, \"identity\"\
-            , {}).user.groups != [] }\nelse := []\n\n# Allow if user is in allowed\
-            \ users\nallow {\n    username == allowed_users[_]\n}\n\n# Allow if any\
-            \ user group is in allowed groups\nallow {\n    groups[_] == allowed_groups[_]\n\
-            }\n"
+            \ := [\"system:authenticated\"]\nallowed_users := [\"admin\"]\n\n# Extract\
+            \ username from API key, OIDC, or K8s token\nusername := input.auth.metadata.apiKeyValidation.username\n\
+            \    { object.get(input.auth, \"metadata\", {}).apiKeyValidation.username\
+            \ != \"\" }\nelse := input.auth.identity.preferred_username\n    { object.get(input.auth,\
+            \ \"identity\", {}).preferred_username != \"\" }\nelse := input.auth.identity.sub\n\
+            \    { object.get(input.auth, \"identity\", {}).sub != \"\" }\nelse :=\
+            \ input.auth.identity.user.username\n    { object.get(input.auth, \"identity\"\
+            , {}).user.username != \"\" }\nelse := \"\"\n\n# Extract groups from API\
+            \ key, OIDC, or K8s token\ngroups := input.auth.metadata.apiKeyValidation.groups\n\
+            \    { object.get(input.auth, \"metadata\", {}).apiKeyValidation.groups\
+            \ != [] }\nelse := input.auth.identity.groups\n    { object.get(input.auth,\
+            \ \"identity\", {}).groups != [] }\nelse := input.auth.identity.user.groups\n\
+            \    { object.get(input.auth, \"identity\", {}).user.groups != [] }\n\
+            else := []\n\n# Allow if user is in allowed users\nallow {\n    username\
+            \ == allowed_users[_]\n}\n\n# Allow if any user group is in allowed groups\n\
+            allow {\n    groups[_] == allowed_groups[_]\n}\n"
         priority: 0
       subscription-valid:
         cache:

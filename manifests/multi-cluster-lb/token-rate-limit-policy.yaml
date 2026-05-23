@@ -2,15 +2,85 @@ apiVersion: kuadrant.io/v1alpha1
 kind: TokenRateLimitPolicy
 metadata:
   labels:
+    app.kubernetes.io/component: token-rate-limit-policy
+    app.kubernetes.io/managed-by: maas-controller
     app.kubernetes.io/part-of: multi-cluster-lb
+    maas.opendatahub.io/model: gemma2-9b-fp8
+    maas.opendatahub.io/model-namespace: models-as-a-service
   name: maas-trlp-gemma-multi-cluster
   namespace: models-as-a-service
+  ownerReferences:
+  - apiVersion: gateway.networking.k8s.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: HTTPRoute
+    name: gemma2-9b-fp8-kserve-route
+    uid: 59e3c0ac-58f1-4937-b394-891dff448887
 spec:
   limits:
-    global:
+    models-as-a-service-admin-subscription-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
       rates:
-      - limit: 1000000
+      - limit: 1000000000
+        window: 24h
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/admin-subscription@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-a-ml-engineering-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 500000
         window: 1h
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-a-ml-engineering@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-a-premium-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 100000
+        window: 1m
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-a-premium@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-b-data-science-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 100000
+        window: 1h
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-b-data-science@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-b-standard-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 50000
+        window: 1m
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-b-standard@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-c-app-developers-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 50000
+        window: 1h
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-c-app-developers@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
+    models-as-a-service-team-c-basic-gemma2-9b-fp8-tokens:
+      counters:
+      - expression: auth.identity.userid
+      rates:
+      - limit: 20000
+        window: 1m
+      when:
+      - predicate: auth.identity.selected_subscription_key == "models-as-a-service/team-c-basic@models-as-a-service/gemma2-9b-fp8"
+          && !request.path.endsWith("/v1/models")
   targetRef:
     group: gateway.networking.k8s.io
     kind: HTTPRoute
