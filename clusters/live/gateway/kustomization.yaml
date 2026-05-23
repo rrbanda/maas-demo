@@ -65,3 +65,11 @@ patches:
       - op: replace
         path: /spec/externalName
         value: inference-b.sandbox2582.opentlc.com
+  # ExternalModel — Cluster 2 gemma endpoint
+  - target:
+      kind: ExternalModel
+      name: gemma2-9b-fp8-cluster2
+    patch: |-
+      - op: replace
+        path: /spec/endpoint
+        value: gemma2-9b-fp8-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
