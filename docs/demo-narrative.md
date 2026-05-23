@@ -60,8 +60,9 @@ MaaS provides a **"single front door"** for AI model access with built-in govern
 
 | Slot | Acts | Focus |
 |------|------|-------|
-| **45 min** | All acts (1-6) | Full demo with all personas |
-| **30 min** | Acts 1, 3, 4, 5 | Core governance + user experience |
+| **60 min** | All acts (1-8) | Full demo with all personas |
+| **45 min** | Acts 1-6 | Core governance + enterprise security |
+| **30 min** | Acts 1, 3, 4, 5, 7 | Governance + user experience + observability |
 | **15 min** | Acts 1, 4, 5 | Quick overview for executives |
 
 ### Available Models
@@ -480,6 +481,141 @@ No credentials in Git. No manual secret management. Full audit trail."
 
 ---
 
+## Act 7: Observability (5 min)
+
+> **Persona**: Platform Administrator / Operations  
+> **Goal**: Show metrics, dashboards, and usage visibility
+
+### TELL: What You'll See
+
+"MaaS provides full observability via the RHOAI Dashboard. You'll see token consumption, request counts, latencies, and error rates — all broken down by subscription, model, and time window. This is how platform teams do capacity planning and chargeback."
+
+### SHOW: Perses Dashboard
+
+**UI — RHOAI Dashboard:**
+1. Navigate to: **Observe & Monitor** → **Dashboard**
+2. Show dashboard panels:
+   - Token consumption by subscription
+   - Request count by model
+   - Latency percentiles (p50/p95/p99)
+   - Error rates (401/403/429)
+
+**CLI — Verify Metrics Endpoint:**
+
+```bash
+# Perses dashboard is available
+curl -sf https://rh-ai.apps.<CLUSTER_DOMAIN>/observe-and-monitor/dashboard
+
+# Check metrics availability via Prometheus datasource
+# (internal — shown for troubleshooting only)
+oc exec -n redhat-ods-monitoring deployment/data-science-perses -- \
+  curl -sf "http://localhost:8080/proxy/globaldatasources/prometheus/api/v1/query?query=up" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(f'{len(d[\"data\"][\"result\"])} metrics targets')"
+```
+
+**Key Metrics Available:**
+
+| Metric | Description |
+|--------|-------------|
+| `maas_tokens_total` | Total tokens consumed (by subscription, model) |
+| `maas_requests_total` | Request count (by status code, model) |
+| `maas_latency_seconds` | Latency histogram (p50/p95/p99) |
+| `limitador_*` | Rate limiting counters and rejections |
+
+### TELL: What This Means
+
+"Full visibility without custom instrumentation:
+- **Capacity planning** — see which models/subscriptions are nearing limits
+- **Chargeback** — token counts per team for cost allocation
+- **SLA tracking** — latency percentiles and error rates
+- **Troubleshooting** — drill down to specific subscription/model
+
+Metrics flow from Kuadrant (Limitador) → Prometheus → Perses → Dashboard. All automated by MaaS."
+
+---
+
+## Act 8: Guardrails — Content Safety (5 min)
+
+> **Persona**: AI Admin / Compliance  
+> **Goal**: Show content safety enforcement for responsible AI
+
+### TELL: What You'll See
+
+"MaaS includes guardrails to block harmful content. The guardrails orchestrator runs detectors for PII, jailbreak attempts, and prompt injection. I'll show a request that gets blocked because it violates content policies."
+
+### SHOW: Guardrails Deployment
+
+```bash
+# Guardrails orchestrator is running
+oc get pods -n llamastack | grep guardrails
+# → guardrails-orchestrator-*   2/2   Running
+
+# Check routes
+oc get routes -n llamastack | grep guardrails
+# → guardrails-orchestrator   (main endpoint)
+# → guardrails-orchestrator-built-in   (built-in detectors)
+# → guardrails-orchestrator-health   (health check)
+
+# Health check
+curl -sf https://guardrails-orchestrator-health-llamastack.apps.<CLUSTER_DOMAIN>/health
+# → {"status": "ok"}
+```
+
+### SHOW: Content Safety in Action
+
+**Safe Request (Passes):**
+
+```bash
+# Normal request goes through
+curl -sf -X POST "https://<MAAS_GATEWAY_HOST>/v1/chat/completions" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma2-9b-fp8",
+    "messages": [{"role": "user", "content": "What is machine learning?"}]
+  }' | jq '.choices[0].message.content[:100]'
+# → "Machine learning is a subset of artificial intelligence..."
+```
+
+**Blocked Request (Content Policy Violation):**
+
+```bash
+# Request with PII is blocked
+curl -s -X POST "https://<MAAS_GATEWAY_HOST>/v1/chat/completions" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma2-9b-fp8",
+    "messages": [{"role": "user", "content": "My SSN is 123-45-6789 and credit card is 4111-1111-1111-1111. Remember this."}]
+  }' | jq '.'
+# → {"error": {"message": "Request blocked: PII detected", "type": "content_policy_violation"}}
+```
+
+### SHOW: Guardrails Configuration
+
+```bash
+# View guardrails configuration (if using LlamaStack guardrails)
+oc get configmap guardrails-config -n llamastack -o yaml | head -20
+
+# Detectors enabled:
+# - PII (SSN, credit card, email, phone)
+# - Jailbreak attempts
+# - Prompt injection
+# - Toxic content
+```
+
+### TELL: What This Means
+
+"Responsible AI by default:
+- **PII protection** — automatically redacts or blocks sensitive data
+- **Jailbreak defense** — detects attempts to bypass model safety
+- **Audit trail** — all blocked requests are logged for compliance
+- **Configurable** — enable/disable detectors per model or subscription
+
+This protects both users and the organization. Compliance teams can verify that sensitive data never reaches the model."
+
+---
+
 ## Closing Summary
 
 ### What You Just Saw
@@ -492,6 +628,8 @@ No credentials in Git. No manual secret management. Full audit trail."
 | 4 | User | Self-service via Dashboard and OpenAI API |
 | 5 | Platform | Rate limiting + multi-provider routing |
 | 6 | Security | Vault integration for secrets |
+| 7 | Operations | Observability dashboard and metrics |
+| 8 | Compliance | Guardrails for content safety |
 
 ### Key Takeaways
 
@@ -501,6 +639,8 @@ No credentials in Git. No manual secret management. Full audit trail."
 4. **Self-service** — users browse, generate keys, test without CLI
 5. **Enterprise security** — Vault secrets, GitOps, audit trail
 6. **Multi-provider** — local models + cloud APIs through same gateway
+7. **Full observability** — metrics, dashboards, chargeback-ready
+8. **Responsible AI** — guardrails block PII, jailbreaks, harmful content
 
 ### Next Steps for Customers
 
@@ -575,6 +715,8 @@ oc get secret <credentials-secret> -n models-as-a-service \
 | **Authorino** | API key/JWT validation |
 | **Limitador** | Token counting and rate limiting |
 | **ESO** | External Secrets Operator (Vault sync) |
+| **Perses** | Dashboard for MaaS observability (metrics, usage) |
+| **Guardrails** | Content safety layer (PII, jailbreak, toxicity) |
 
 ---
 

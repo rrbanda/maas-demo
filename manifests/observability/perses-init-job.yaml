@@ -40,16 +40,42 @@ subjects:
     name: perses-init
     namespace: redhat-ods-monitoring
 ---
-# CronJob to refresh Perses authentication token every 2 hours
-# Prevents "Unauthorized" errors when the SA token expires
-# Token validity is 24h; 2h refresh provides adequate safety margin
+# Allow perses-init to create long-lived tokens for itself
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: perses-init-token-creator
+  namespace: redhat-ods-monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["perses-init"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: perses-init-token-creator-binding
+  namespace: redhat-ods-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: perses-init-token-creator
+subjects:
+  - kind: ServiceAccount
+    name: perses-init
+    namespace: redhat-ods-monitoring
+---
+# CronJob to refresh Perses authentication token weekly
+# Uses long-lived tokens (10 years) to avoid frequent expiration
+# Weekly refresh ensures recovery after pod restarts
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: perses-token-refresh
   namespace: redhat-ods-monitoring
 spec:
-  schedule: "0 */2 * * *"
+  schedule: "0 0 * * 0"  # Weekly on Sunday at midnight
   concurrencyPolicy: Replace
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5
@@ -69,7 +95,8 @@ spec:
                 - |
                   set -e
                   PERSES_URL="http://data-science-perses.redhat-ods-monitoring.svc:8080"
-                  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                  # Create a long-lived token (10 years) instead of using the pod's short-lived token
+                  TOKEN=$(oc create token perses-init -n redhat-ods-monitoring --duration=87600h)
                   
                   echo "[$(date -Iseconds)] Starting Perses token refresh..."
                   
@@ -166,9 +193,9 @@ spec:
                 sleep 10
               done
               
-              # Get SA token
-              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-              echo "Token obtained (length: ${#TOKEN})"
+              # Create long-lived token (10 years) for Thanos access
+              TOKEN=$(oc create token perses-init -n redhat-ods-monitoring --duration=87600h)
+              echo "Long-lived token created (length: ${#TOKEN}, valid for 10 years)"
               
               # Create Projects
               echo "Creating projects..."

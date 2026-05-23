@@ -11,10 +11,14 @@ spec:
     name: maas-default-gateway
   apiKeys:
     maxExpirationDays: 90
+  externalOIDC:
+    clientId: ai-bridge-gateway
+    issuerUrl: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
+    ttl: 3600
   telemetry:
     enabled: true
     metrics:
       captureGroup: false
       captureModelUsage: true
       captureOrganization: true
-      captureUser: false
+      captureUser: true

@@ -1,0 +1,18 @@
+# ExternalName Service enables the HTTPRoute backendRef to target Cluster 3's vLLM.
+# The HTTPRoute can reference this Service alongside the local vLLM service
+# for weighted traffic splitting.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gemma2-9b-fp8-cluster3
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  type: ExternalName
+  externalName: REPLACE_WITH_CLUSTER3_VLLM_HOST
+  ports:
+    - port: 443
+      targetPort: 443
+      protocol: TCP
+      name: https

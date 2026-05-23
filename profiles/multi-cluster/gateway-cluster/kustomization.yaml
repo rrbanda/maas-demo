@@ -23,3 +23,5 @@ resources:
   - ../../../manifests/platform/dsci-patch
   # ServiceMonitors + MonitoringStack patch
   - ../../../manifests/platform/observability
+  # Multi-cluster load balancing (Cluster 3 vLLM backend)
+  - ../../../manifests/multi-cluster-lb
