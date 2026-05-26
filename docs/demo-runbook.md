@@ -10,14 +10,14 @@
 ## Pre-Demo Setup (run before the call)
 
 ```bash
-oc login https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443 --username=admin --password=MzA0NjE1NjM2 --insecure-skip-tls-verify
+oc login https://api.<CLUSTER_DOMAIN>:6443 --username=admin --password=<ADMIN_PASSWORD> --insecure-skip-tls-verify
 
-export MAAS_GW="ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com"
-export API_KEY="sk-oai-e9lhgDa0SY5NC2VA_evZTorg6iaUNnr1Oa1QreeR0uTjgWTMCjzX8Wf9HU5e"
+export MAAS_GW="<MAAS_GATEWAY_HOST>"
+export API_KEY="<YOUR_API_KEY>"  # Generate via RHOAI Dashboard: Gen AI Studio → API Keys
 ```
 
-**Dashboard URL**: https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com  
-**Login**: admin / MzA0NjE1NjM2
+**Dashboard URL**: `https://rh-ai.apps.<CLUSTER_DOMAIN>`  
+**Login**: admin / `<ADMIN_PASSWORD>`
 
 ---
 
