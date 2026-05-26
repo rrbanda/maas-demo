@@ -39,6 +39,8 @@ oc get tenant default-tenant -n models-as-a-service
 ```
 → `Ready / Reconciled`
 
+> Say: "The Tenant is the root custom resource for all AI Bridge configuration. It's a singleton — one per cluster. It configures API key expiration limits, external OIDC authentication, telemetry, and the gateway reference. Ready means all components are provisioned."
+
 ```bash
 oc get kuadrant -n kuadrant-system
 ```
