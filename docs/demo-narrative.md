@@ -129,6 +129,32 @@ oc get kuadrant -n kuadrant-system
 # → kuadrant   Ready   (provides Authorino + Limitador)
 ```
 
+### SHOW: GitOps Deployment
+
+"Everything you see here is GitOps-managed. The entire AI Bridge configuration — subscriptions, auth policies, tenant settings, observability — lives in a Git repository and is deployed via ArgoCD."
+
+**UI — ArgoCD Console:**
+- Open ArgoCD: `https://openshift-gitops-server-openshift-gitops.apps.<CLUSTER_DOMAIN>`
+- Show `maas-demo-gateway` application: **Synced / Healthy**
+- Click into the app to show the resource tree (subscriptions, auth policies, ExternalModels, Vault, observability)
+
+![ArgoCD Apps](images/argocd-apps.png)
+
+**CLI:**
+```bash
+# ArgoCD app status
+oc get applications.argoproj.io maas-demo-gateway -n openshift-gitops \
+  -o jsonpath='Sync: {.status.sync.status}  Health: {.status.health.status}'
+# → Sync: Synced  Health: Healthy
+
+# Git repo source
+oc get applications.argoproj.io maas-demo-gateway -n openshift-gitops \
+  -o jsonpath='Repo: {.spec.source.repoURL}  Path: {.spec.source.path}'
+# → Repo: https://github.com/rrbanda/maas-demo.git  Path: clusters/live/gateway
+```
+
+**Key point:** "Change a subscription limit in Git → push → ArgoCD syncs automatically → MaaS enforces the new limit. No manual `oc apply`, no drift. This is how Wells Fargo would manage AI Bridge policies in production — the same GitOps workflow they use for everything else."
+
 ### TELL: What This Means
 
 "With MaaS enabled, the platform automatically provisions:
@@ -137,7 +163,7 @@ oc get kuadrant -n kuadrant-system
 - **MaaS API** for key management
 - **PostgreSQL** for storing key hashes
 
-Cluster admins enable it once. The operator handles the rest."
+Cluster admins enable it once. The operator handles the rest. The entire configuration is GitOps-managed — declarative, version-controlled, auditable."
 
 ---
 
