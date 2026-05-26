@@ -10,7 +10,9 @@ metadata:
     app.kubernetes.io/part-of: ai-gateway
 spec:
   parentRefs:
-    - name: ai-inference-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ai-inference-gateway
       namespace: ai-gateway
   rules:
     - matches:
@@ -24,5 +26,8 @@ spec:
               - name: Host
                 value: REPLACE_WITH_REMOTE_MODEL_HOSTNAME
       backendRefs:
-        - name: inference-backend
+        - group: ""
+          kind: Service
+          name: inference-backend
           port: 443
+          weight: 1
