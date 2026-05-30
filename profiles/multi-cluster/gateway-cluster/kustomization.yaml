@@ -23,7 +23,7 @@ resources:
   - ../../../manifests/platform/dsci-patch
   # ServiceMonitors + MonitoringStack patch
   - ../../../manifests/platform/observability
-  # llm-d EPP (Endpoint Picker for intelligent inference routing)
-  - ../../../manifests/llm-d-gateway
+  # llm-d EPP is now managed by KServe via scheduler: {} in LLMInferenceService.
+  # The standalone manifests/llm-d-gateway/ is no longer needed.
   # Multi-cluster load balancing (Cluster 3 vLLM backend)
   - ../../../manifests/multi-cluster-lb

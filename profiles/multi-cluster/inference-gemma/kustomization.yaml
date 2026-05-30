@@ -21,8 +21,8 @@ resources:
   - ../../../manifests/platform/authorino-tls
   # Observability (Perses dashboards initialization)
   - ../../../manifests/observability
-  # llm-d for gemma2-9b-fp8 (EPP + InferencePool + InferenceModel)
-  - ../../../manifests/llm-d-inference
+  # llm-d EPP is now managed by KServe via scheduler: {} in LLMInferenceService.
+  # The standalone manifests/llm-d-inference/ is no longer needed.
   # Guardrails
   - ../../../manifests/guardrails
   # OIDC
