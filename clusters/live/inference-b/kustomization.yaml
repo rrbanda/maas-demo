@@ -1,7 +1,6 @@
 # Inference Cluster B (bf44z/sandbox2582) — gemma2-9b-fp8 with llm-d
-# Model and EPP are in models-as-a-service namespace on this cluster.
+# llm-d EPP is now managed by KServe via scheduler: {} in LLMInferenceService.
+# No standalone EPP resources needed.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources:
-  # llm-d EPP for gemma2-9b-fp8 in models-as-a-service namespace
-  - ../../../manifests/llm-d-gateway
+resources: []
