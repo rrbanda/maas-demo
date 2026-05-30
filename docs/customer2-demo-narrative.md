@@ -122,39 +122,49 @@ curl -sk --max-time 10 -o /dev/null -w "Gemini: HTTP %{http_code}\n" \
 flowchart LR
     Client(["Client<br/>sk-oai-* key"]):::client
 
-    subgraph bridge ["AI Bridge"]
+    subgraph bridge ["AI Bridge Cluster"]
+        GW["MaaS Gateway<br/>Envoy + ELB"]:::routing
         Auth["Authorino"]:::governance
+        PG[("PostgreSQL")]:::infra
         Lim["Limitador"]:::governance
+        Route{{"HTTPRoute<br/>Weighted Split"}}:::routing
+        Vault["Vault + ESO"]:::infra
+
+        GW --> Auth
+        Auth -.->|"validate key"| PG
         Auth --> Lim
+        Lim --> Route
     end
 
-    Lim --> PoolA
-    Lim --> PoolB
-    Lim --> Gemini
-
-    subgraph PoolA ["Pool A — AI Bridge (50%)"]
+    subgraph PoolA ["Pool A — Local (50%)"]
         EPP1["llm-d EPP"]:::inference
         vLLM1[("vLLM<br/>gemma2-9b-fp8")]:::inference
         EPP1 --> vLLM1
     end
 
     subgraph PoolB ["Pool B — Cluster B (50%)"]
+        IST["Istio Gateway"]:::routing
         EPP2["llm-d EPP"]:::inference
         vLLM2[("vLLM<br/>gemma2-9b-fp8")]:::inference
+        IST --> EPP2
         EPP2 --> vLLM2
     end
 
-    Gemini[["Gemini API<br/>(external)"]]:::external
+    Gemini[["Google Gemini API"]]:::external
 
-    Client --> Auth
+    Client --> GW
+    Route -->|"50%"| EPP1
+    Route -->|"50%"| IST
+    Vault -.->|"inject key"| Gemini
+    GW -.->|"ExternalModel"| Gemini
 
     classDef client fill:#f5f5f5,stroke:#424242,stroke-width:2px,color:#424242
     classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
+    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
     classDef inference fill:#e6f4ea,stroke:#0d904f,stroke-width:2px,color:#0d904f
     classDef external fill:#f3e8fd,stroke:#9334e6,stroke-width:2px,color:#9334e6
+    classDef infra fill:#f1f3f4,stroke:#5f6368,stroke-width:2px,color:#5f6368
 ```
-
-**How it works:** Client → Authorino (validates API key) → Limitador (checks token budget) → routes to one of three backends: Pool A (local vLLM, 50%), Pool B (remote Cluster B, 50%), or Gemini (external provider). llm-d EPP on each pool selects the optimal vLLM replica.
 
 > The same model is also deployed on **Inference Cluster A (4l6x6)** with KServe-managed llm-d, demonstrating multi-location deployment. Cluster A is accessible through its own gateway and can be added to the weighted route at any time.
 
