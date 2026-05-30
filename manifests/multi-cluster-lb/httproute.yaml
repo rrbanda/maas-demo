@@ -26,6 +26,7 @@ spec:
     filters:
     - type: URLRewrite
       urlRewrite:
+        hostname: REPLACE_WITH_CLUSTER3_ROUTE_HOSTNAME
         path:
           replacePrefixMatch: /v1/completions
           type: ReplacePrefixMatch
@@ -47,6 +48,7 @@ spec:
     filters:
     - type: URLRewrite
       urlRewrite:
+        hostname: REPLACE_WITH_CLUSTER3_ROUTE_HOSTNAME
         path:
           replacePrefixMatch: /v1/chat/completions
           type: ReplacePrefixMatch
@@ -68,6 +70,7 @@ spec:
     filters:
     - type: URLRewrite
       urlRewrite:
+        hostname: REPLACE_WITH_CLUSTER3_ROUTE_HOSTNAME
         path:
           replacePrefixMatch: /v1/models
           type: ReplacePrefixMatch
@@ -89,6 +92,7 @@ spec:
     filters:
     - type: URLRewrite
       urlRewrite:
+        hostname: REPLACE_WITH_CLUSTER3_ROUTE_HOSTNAME
         path:
           replacePrefixMatch: /
           type: ReplacePrefixMatch

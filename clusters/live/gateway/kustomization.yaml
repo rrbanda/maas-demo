@@ -43,6 +43,23 @@ patches:
       - op: replace
         path: /spec/rules/authentication/keycloak-jwt/jwt/issuerUrl
         value: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
+  # Multi-cluster LB — Host header rewrite for remote backend
+  - target:
+      kind: HTTPRoute
+      name: gemma-multi-cluster-route
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/filters/0/urlRewrite/hostname
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
+      - op: replace
+        path: /spec/rules/1/filters/0/urlRewrite/hostname
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
+      - op: replace
+        path: /spec/rules/2/filters/0/urlRewrite/hostname
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
+      - op: replace
+        path: /spec/rules/3/filters/0/urlRewrite/hostname
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   # Multi-cluster LB — Inference Cluster B (bf44z / sandbox2582)
   - target:
       kind: ServiceEntry
