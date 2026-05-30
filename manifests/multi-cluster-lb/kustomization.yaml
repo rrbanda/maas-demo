@@ -1,11 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # Cluster B (bf44z) routing
   - service-entry.yaml
   - destination-rule.yaml
   - external-service.yaml
   - service-entry-gateway-ns.yaml
   - destination-rule-gateway-ns.yaml
+  # Cluster A (4l6x6) routing
+  - external-service-cluster-a.yaml
+  - service-entry-cluster-a.yaml
+  - destination-rule-cluster-a.yaml
+  # Multi-cluster LB HTTPRoute + governance
   - httproute.yaml
   - authpolicy.yaml
   - token-rate-limit-policy.yaml

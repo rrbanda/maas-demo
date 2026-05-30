@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gemma2-9b-fp8-cluster-a
+  namespace: models-as-a-service
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  type: ExternalName
+  externalName: gemma2-9b-fp8-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  ports:
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: 443
