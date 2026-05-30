@@ -146,7 +146,7 @@ flowchart TB
 | **ExternalModel HTTPRoute** | Routes `/gemini-2-0-flash/` requests to Google Gemini. Credentials injected by Vault via payload-processing plugin. |
 | **llm-d EPP** | KServe-managed scheduler on each cluster. Scores pods by KV cache, queue depth, load. Routes to optimal replica when `replicas > 1`. |
 | **Vault + ESO** | Stores provider credentials (Gemini API key). ESO syncs to K8s Secrets. Payload-processing plugin injects into outbound requests. |
-| **Cluster A** | Independent inference cluster with same model + llm-d. Not in the LB route but demonstrates multi-location deployment. Can be added to the HTTPRoute at any time. |
+| **Cluster A** | Independent inference cluster with same model + llm-d. Demonstrates the "deploy in 2+ locations" requirement. Has its own reencrypt Route, anonymous AuthPolicy, and TRLP override — ready for direct access or for adding to a future multi-gateway mesh topology. |
 
 ### Request Lifecycle (Sequence)
 
