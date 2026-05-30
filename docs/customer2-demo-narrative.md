@@ -208,6 +208,12 @@ flowchart LR
 > **Persona**: Solution Architect  
 > **Goal**: Set context — show the multi-cluster topology and AI Grid vision
 
+> **Scenario**: The customer has asked to deploy the same model across multiple RHOAI environments for resilience and scale. They want to understand the overall architecture before seeing it in action.
+>
+> **What we'll show**: The AI Grid visualization, then live proof that gemma2-9b-fp8 is deployed and Ready on 3 separate OpenShift clusters, each with KServe-managed llm-d.
+>
+> **Requirement addressed**: *Deploy model in 2 or more locations/RHOAI environment*
+
 ### TELL
 
 "We're demonstrating the AI Bridge pattern — centralized governance for distributed AI infrastructure. The same model, gemma2-9b-fp8, is deployed across multiple RHOAI environments. Each environment runs llm-d for intelligent inference routing. The AI Bridge provides a single endpoint with authentication, rate limiting, and load balancing across all environments."
@@ -249,6 +255,12 @@ oc --context=ai-bridge get pods -n models-as-a-service | grep router-scheduler
 
 > **Persona**: Cluster Administrator  
 > **Goal**: Show MaaS is enabled, governance stack is running, everything is GitOps-managed
+
+> **Scenario**: The platform team needs to know that the AI governance layer is production-grade: operator-managed, declarative, version-controlled, and auto-synced from Git. They want to see one configuration change that enables the entire stack.
+>
+> **What we'll show**: `modelsAsService: Managed` on the AI Bridge (and `Removed` on inference clusters), Tenant Active, ArgoCD Synced/Healthy from the `maas-demo` Git repo.
+>
+> **Requirement addressed**: *Admin Persona: Deploy model via UI / RHOAI environment*
 
 ### TELL
 
@@ -294,6 +306,12 @@ oc get applications.argoproj.io maas-demo-gateway -n openshift-gitops \
 > **Persona**: Admin — GPU infrastructure visibility  
 > **Goal**: Show GPU consumption and vLLM metrics from each server
 
+> **Scenario**: The infrastructure team needs visibility into GPU utilization, model throughput, and token consumption across all inference environments. They want a single observability plane covering every cluster.
+>
+> **What we'll show**: Prometheus metrics from the AI Bridge cluster — total generation tokens, prompt tokens, active requests, and request success counts. 195 vLLM metric series auto-collected by KServe ServiceMonitors.
+>
+> **Requirement addressed**: *Admin Persona: Being able to see GPU consumption, vLLM metrics from each Server*
+
 ### TELL
 
 "Platform administrators need visibility into GPU utilization, model throughput, and inference latency across all serving environments. RHOAI provides this through Prometheus metrics collected from every vLLM instance and exposed in the dashboard."
@@ -331,6 +349,12 @@ curl -sk -H "Authorization: Bearer $(oc whoami -t)" \
 
 > **Persona**: Admin/User — single endpoint, token accountability  
 > **Goal**: Show one URL for all model access, with per-subscription token tracking
+
+> **Scenario**: Multiple teams need to consume the same model through a single governed endpoint. Each team has different token budgets. The platform team needs per-team usage data for cost allocation and chargeback.
+>
+> **What we'll show**: 7 active MaaS subscriptions with different token limits, a live inference request through the single gateway URL returning `usage.total_tokens`, and the RHOAI Dashboard where users self-serve API keys.
+>
+> **Requirements addressed**: *Expose the deployed Model as a single Endpoint behind an AI Gateway* + *Ability to track the usage of Tokens based on the exposed LLM Endpoint*
 
 ### TELL
 
@@ -371,6 +395,12 @@ curl -sk "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completio
 
 > **Persona**: Admin — deploy model in 2+ locations, load balance  
 > **Goal**: Prove the same model on 2 clusters with traffic distributed through the AI Bridge
+
+> **Scenario**: The same model is deployed on the AI Bridge cluster and on a remote inference cluster. The customer wants a single endpoint that load-balances across both, with full governance regardless of which cluster handles the request.
+>
+> **What we'll show**: The weighted HTTPRoute (50/50 split), 6 live requests all returning HTTP 200, gateway proxy logs proving traffic goes to BOTH local and remote backends, and annotated llm-d EPP logs proving intelligent routing is in the traffic path.
+>
+> **Requirements addressed**: *Is there a way to have the same model deployed in 2 clusters and load balance between the two* + *Show AI gateway handling routing and prompt processing*
 
 ### TELL
 
@@ -451,6 +481,12 @@ oc logs -n models-as-a-service deploy/gemma2-9b-fp8-kserve-router-scheduler -c m
 > **Persona**: Admin — route to external provider when needed  
 > **Goal**: Show the same gateway routing to Google Gemini, credentials injected server-side
 
+> **Scenario**: Some prompts require capabilities that the locally hosted model doesn't have — for example, a customer wants to route certain requests to Google Gemini or another cloud provider. The AI Bridge should handle this transparently, with the same API key, same governance, and zero credential exposure to end users.
+>
+> **What we'll show**: The ExternalModel CR for Gemini, a live request to Gemini through the same API key, and the Vault/ESO credential chain that injects the provider key server-side.
+>
+> **Requirement addressed**: *Route to an external provider/NeoCloud if detected. Prompt can not be handled by a Model hosted on AI Grid*
+
 ### TELL
 
 "The AI Bridge routes to any OpenAI-compatible backend — local vLLM, remote clusters, or cloud providers like Google Gemini. Provider credentials are stored in Vault and injected server-side. Users never see them. Same API key works for everything."
@@ -494,6 +530,12 @@ oc get externalsecret gemini-credentials -n models-as-a-service \
 
 > **Persona**: Admin / Compliance  
 > **Goal**: Show PII detection and content safety enforcement
+
+> **Scenario**: The compliance team requires that PII (SSN, credit card numbers, email addresses) is detected and handled before reaching the model. They need to see a guardrails layer that inspects input, detects violations, and either blocks or flags the request.
+>
+> **What we'll show**: A clean request passing through unfiltered, then a PII-laden request (SSN + credit card) where the model recognizes and refuses to process the sensitive data. Two endpoints: `/passthrough` (no filtering) and `/pii` (PII detection active).
+>
+> **Requirement addressed**: *Apply guardrails to the hosted Model and detect when the violation happens*
 
 ### TELL
 
