@@ -83,6 +83,7 @@ flowchart TB
 
         subgraph routing ["Routing Layer"]
             HTTPRoute{{"HTTPRoute<br/>50/50 Weighted Split"}}
+            ExRoute{{"ExternalModel<br/>HTTPRoute"}}
         end
 
         subgraph localPool ["Pool A — Local InferencePool"]
@@ -93,17 +94,20 @@ flowchart TB
 
         subgraph govStack ["Governance Stack"]
             MaaSAPI["MaaS API + PostgreSQL"]
-            Vault["Vault + ESO<br/>credential injection"]
+            Vault["Vault + ESO"]
             Subs["7 MaaS Subscriptions"]
         end
 
         GW --> Auth
         Auth --> Lim
         Lim --> HTTPRoute
+        Lim --> ExRoute
         HTTPRoute -->|"weight: 50"| EPP_local
+        MaaSAPI -.-> Auth
+        Vault -.->|"inject credentials<br/>into outbound requests"| GW
     end
 
-    subgraph clusterB ["Inference Cluster B — Remote InferencePool"]
+    subgraph clusterB ["Inference Cluster B (bf44z)"]
         GW_B{{"Istio Gateway"}}
         EPP_B["llm-d EPP<br/>KServe-managed"]
         vLLM_B[("vLLM<br/>gemma2-9b-fp8")]
@@ -111,23 +115,31 @@ flowchart TB
         EPP_B --> vLLM_B
     end
 
-    subgraph clusterA ["Inference Cluster A — Independent"]
+    subgraph clusterA ["Inference Cluster A (4l6x6)"]
         EPP_A["llm-d EPP<br/>KServe-managed"]
         vLLM_A[("vLLM<br/>gemma2-9b-fp8")]
         EPP_A --> vLLM_A
     end
 
-    subgraph external ["External Providers"]
-        Gemini[["Google Gemini API"]]
-    end
+    Gemini[["Google Gemini API"]]
 
     Client -->|"sk-oai-* API key"| GW
-    HTTPRoute -->|"weight: 50<br/>via ExternalName"| GW_B
-    GW -->|"ExternalModel"| Gemini
-    Vault -.->|"inject provider keys"| Gemini
+    HTTPRoute -->|"weight: 50<br/>ExternalName:443"| GW_B
+    ExRoute -->|"payload-processing<br/>injects Gemini key"| Gemini
 ```
 
-> **Note on Cluster A:** Inference Cluster A runs the same model with llm-d independently. It is not in the multi-cluster LB route but demonstrates model deployment across locations. It can be added to the weighted HTTPRoute at any time.
+**What each component does:**
+
+| Component | What it does in this setup |
+|-----------|---------------------------|
+| **MaaS Gateway** | Single entry point for all traffic. Envoy proxy behind an AWS ELB. |
+| **Authorino** | Validates `sk-oai-*` API keys against PostgreSQL on every request. |
+| **Limitador** | Enforces per-subscription token budgets (e.g. 100K tokens/min for premium). |
+| **HTTPRoute (50/50)** | Weighted split: 50% to local Pool A, 50% to Cluster B via ExternalName Service. |
+| **ExternalModel HTTPRoute** | Routes `/gemini-2-0-flash/` requests to Google Gemini. Credentials injected by Vault via payload-processing plugin. |
+| **llm-d EPP** | KServe-managed scheduler on each cluster. Scores pods by KV cache, queue depth, load. Routes to optimal replica when `replicas > 1`. |
+| **Vault + ESO** | Stores provider credentials (Gemini API key). ESO syncs to K8s Secrets. Payload-processing plugin injects into outbound requests. |
+| **Cluster A** | Independent inference cluster with same model + llm-d. Not in the LB route but demonstrates multi-location deployment. Can be added to the HTTPRoute at any time. |
 
 ### Request Lifecycle (Sequence)
 
