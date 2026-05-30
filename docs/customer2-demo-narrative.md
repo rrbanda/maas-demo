@@ -70,32 +70,32 @@ curl -sk --max-time 10 -o /dev/null -w "Gemini: HTTP %{http_code}\n" \
 
 ```mermaid
 flowchart TB
-    Client(["Client / API Consumer"])
+    Client(["Client / API Consumer"]):::client
 
     subgraph bridge ["AI Bridge Cluster — Governance + Inference"]
         direction TB
 
         subgraph gateway ["MaaS Gateway"]
-            GW{{"Envoy + ELB<br/>Single Entry Point"}}
-            Auth[["Authorino<br/>API Key Validation"]]
-            Lim[["Limitador<br/>Token Rate Limiting"]]
+            GW{{"Envoy + ELB<br/>Single Entry Point"}}:::routing
+            Auth[["Authorino<br/>API Key Validation"]]:::governance
+            Lim[["Limitador<br/>Token Rate Limiting"]]:::governance
         end
 
         subgraph routing ["Routing Layer"]
-            HTTPRoute{{"HTTPRoute<br/>50/50 Weighted Split"}}
-            ExRoute{{"ExternalModel<br/>HTTPRoute"}}
+            HTTPRoute{{"HTTPRoute<br/>50/50 Weighted Split"}}:::routing
+            ExRoute{{"ExternalModel<br/>HTTPRoute"}}:::routing
         end
 
         subgraph localPool ["Pool A — Local InferencePool"]
-            EPP_local["llm-d EPP<br/>KServe-managed"]
-            vLLM_local[("vLLM<br/>gemma2-9b-fp8")]
+            EPP_local["llm-d EPP<br/>KServe-managed"]:::inference
+            vLLM_local[("vLLM<br/>gemma2-9b-fp8")]:::inference
             EPP_local --> vLLM_local
         end
 
         subgraph govStack ["Governance Stack"]
-            MaaSAPI["MaaS API + PostgreSQL"]
-            Vault["Vault + ESO"]
-            Subs["7 MaaS Subscriptions"]
+            MaaSAPI["MaaS API + PostgreSQL"]:::infra
+            Vault["Vault + ESO"]:::infra
+            Subs["7 MaaS Subscriptions"]:::governance
         end
 
         GW --> Auth
@@ -108,24 +108,31 @@ flowchart TB
     end
 
     subgraph clusterB ["Inference Cluster B (bf44z)"]
-        GW_B{{"Istio Gateway"}}
-        EPP_B["llm-d EPP<br/>KServe-managed"]
-        vLLM_B[("vLLM<br/>gemma2-9b-fp8")]
+        GW_B{{"Istio Gateway"}}:::routing
+        EPP_B["llm-d EPP<br/>KServe-managed"]:::inference
+        vLLM_B[("vLLM<br/>gemma2-9b-fp8")]:::inference
         GW_B --> EPP_B
         EPP_B --> vLLM_B
     end
 
     subgraph clusterA ["Inference Cluster A (4l6x6)"]
-        EPP_A["llm-d EPP<br/>KServe-managed"]
-        vLLM_A[("vLLM<br/>gemma2-9b-fp8")]
+        EPP_A["llm-d EPP<br/>KServe-managed"]:::inference
+        vLLM_A[("vLLM<br/>gemma2-9b-fp8")]:::inference
         EPP_A --> vLLM_A
     end
 
-    Gemini[["Google Gemini API"]]
+    Gemini[["Google Gemini API"]]:::external
 
     Client -->|"sk-oai-* API key"| GW
     HTTPRoute -->|"weight: 50<br/>ExternalName:443"| GW_B
     ExRoute -->|"payload-processing<br/>injects Gemini key"| Gemini
+
+    classDef client fill:#f5f5f5,stroke:#424242,stroke-width:2px,color:#424242
+    classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
+    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
+    classDef inference fill:#e6f4ea,stroke:#0d904f,stroke-width:2px,color:#0d904f
+    classDef external fill:#f3e8fd,stroke:#9334e6,stroke-width:2px,color:#9334e6
+    classDef infra fill:#f1f3f4,stroke:#5f6368,stroke-width:2px,color:#5f6368
 ```
 
 **What each component does:**
@@ -145,13 +152,21 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant GW as MaaS Gateway
-    participant A as Authorino
-    participant L as Limitador
-    participant HR as HTTPRoute
-    participant EPP as llm-d EPP
-    participant V as vLLM Pod
+    box rgb(245,245,245) Client
+        participant C as Client
+    end
+    box rgb(232,240,254) MaaS Governance
+        participant GW as MaaS Gateway
+        participant A as Authorino
+        participant L as Limitador
+    end
+    box rgb(254,243,230) Routing
+        participant HR as HTTPRoute
+    end
+    box rgb(230,244,234) Inference
+        participant EPP as llm-d EPP
+        participant V as vLLM Pod
+    end
 
     C->>GW: POST /v1/chat/completions<br/>Authorization: Bearer sk-oai-...
     GW->>A: Validate API key
@@ -182,23 +197,23 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph gov ["MaaS Governance"]
-        AuthLim["Auth + Rate Limit<br/>(already passed)"]
+        AuthLim["Auth + Rate Limit<br/>(already passed)"]:::governance
     end
 
     subgraph split ["Weighted HTTPRoute"]
-        HR{{"50 / 50"}}
+        HR{{"50 / 50"}}:::routing
     end
 
     subgraph poolA ["Pool A — AI Bridge"]
-        EPP1["llm-d EPP"]
-        vLLM1[("vLLM")]
+        EPP1["llm-d EPP"]:::inference
+        vLLM1[("vLLM")]:::inference
         EPP1 --> vLLM1
     end
 
     subgraph poolB ["Pool B — Cluster B"]
-        IST{{"Istio Gateway"}}
-        EPP2["llm-d EPP"]
-        vLLM2[("vLLM")]
+        IST{{"Istio Gateway"}}:::routing
+        EPP2["llm-d EPP"]:::inference
+        vLLM2[("vLLM")]:::inference
         IST --> EPP2
         EPP2 --> vLLM2
     end
@@ -206,6 +221,10 @@ flowchart LR
     AuthLim --> HR
     HR -->|"local:8000"| EPP1
     HR -->|"ExternalName:443"| IST
+
+    classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
+    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
+    classDef inference fill:#e6f4ea,stroke:#0d904f,stroke-width:2px,color:#0d904f
 ```
 
 **Three clusters, one governance point:**
