@@ -1,9 +1,65 @@
-# AI Bridge Demo — Multi-Cluster Distributed Inference
+# AI Bridge Demo — MaaS Governance + Multi-Cluster Distributed Inference
 
 > **Product**: Models-as-a-Service (MaaS) + Distributed Inference with llm-d — Red Hat OpenShift AI 3.4  
-> **Pattern**: AI Bridge — centralized governance with distributed inference across multiple RHOAI environments  
-> **Format**: Tell-Show-Tell  
-> **Duration**: 45 minutes
+> **Pattern**: AI Bridge — centralized governance for distributed AI infrastructure  
+> **Format**: Tell-Show-Tell with persona-based acts  
+> **Duration**: 60 minutes (see timing options below)
+
+---
+
+## Executive Summary
+
+### The Problem
+
+When enterprises let hundreds of teams use AI models, they face chaos:
+
+| Challenge | Impact |
+|-----------|--------|
+| **Access control** | Who gets access to which models? |
+| **Resource management** | One team hogs all capacity |
+| **Accountability** | No tracking of who used what |
+| **Security** | Shared credentials, no audit trail |
+| **Scale** | Same model needed in multiple locations |
+
+### The Solution
+
+MaaS provides a **single front door** for AI model access with built-in governance:
+
+| Capability | What It Means |
+|------------|---------------|
+| **One entry point** | Users don't know where models run. Hit one URL, system routes appropriately. |
+| **Per-team controls** | Team A: 100K tokens/min. Team B: 20K tokens/min. Independent quotas. |
+| **Multi-cluster LB** | Same model on multiple clusters, load balanced through a single endpoint. |
+| **Guardrails** | Exceed limit → 429. Bad key → 401. PII detected → blocked. Other teams unaffected. |
+| **Enterprise-ready** | Secrets via Vault. GitOps-managed. Full audit trail. llm-d for intelligent routing. |
+
+---
+
+## Quick Reference
+
+### Demo Timing Options
+
+| Slot | Acts | Focus |
+|------|------|-------|
+| **60 min** | All acts (1-12) | Full demo with all personas |
+| **45 min** | Acts 1-3, 5-7, 9, 12 | Core governance + multi-cluster + external provider |
+| **30 min** | Acts 1, 5, 7, 9, 12 | Governance + LB + external + summary |
+| **15 min** | Acts 1, 5, 9 | Quick overview for executives |
+
+### Available Models
+
+| Model | Type | Status | Backend |
+|-------|------|--------|---------|
+| `gemma2-9b-fp8` | Local + Multi-cluster | Ready | vLLM on AI Bridge + Cluster B |
+| `gemini-2-0-flash` | External | Ready | Google Gemini API |
+
+### URLs
+
+| Component | URL |
+|-----------|-----|
+| RHOAI Dashboard | `https://rhods-dashboard-redhat-ods-applications.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` |
+| MaaS Gateway | `https://<MAAS_GW>` (AWS ELB) |
+| OpenShift Console | `https://console-openshift-console.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com` |
 
 ---
 
@@ -16,8 +72,6 @@ export MAAS_GW="ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaw
 export API_KEY="<YOUR_API_KEY>"  # Generate via RHOAI Dashboard
 ```
 
-**Dashboard URL**: `https://rhods-dashboard-redhat-ods-applications.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com`
-
 ### Pre-Flight Checklist (run 5 min before the call)
 
 ```bash
@@ -27,11 +81,9 @@ echo "Cluster A: $(oc --context=inference-a get llminferenceservice gemma2-9b-fp
 echo "Cluster B: $(oc --context=ai-bridge get llminferenceservice gemma2-9b-fp8 -n models-as-a-service -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
 # Expected: True / True / True
 
-# 2. KServe llm-d EPP Running on all clusters
+# 2. KServe llm-d EPP Running
 echo "Bridge EPP: $(oc --context=inference-b get pods -n models-as-a-service --no-headers | grep router-scheduler | awk '{print $2,$3}')"
-echo "Cluster A EPP: $(oc --context=inference-a get pods -n llm-inference --no-headers | grep router-scheduler | awk '{print $2,$3}')"
-echo "Cluster B EPP: $(oc --context=ai-bridge get pods -n models-as-a-service --no-headers | grep router-scheduler | awk '{print $2,$3}')"
-# Expected: 3/3 Running on all
+# Expected: 3/3 Running
 
 # 3. Standard endpoint
 curl -sk --max-time 10 -o /dev/null -w "Standard: HTTP %{http_code}\n" \
@@ -55,7 +107,7 @@ curl -sk --max-time 10 -o /dev/null -w "Gemini: HTTP %{http_code}\n" \
 # Expected: HTTP 200
 ```
 
-> All 5 checks must pass before starting the demo. If Gemini returns 400, the API key in Vault may have expired — update `vault-seed-credentials` on the cluster (never in Git).
+> All 5 checks must pass before starting the demo. If Gemini returns 400, update `vault-seed-credentials` on the cluster (never in Git).
 
 **Architecture Visualizations** (open these before the call):
 - [AI Grid — Single Gateway](https://noyitz.github.io/ai-gateway-docs/single-gateway/) — primary demo architecture
@@ -65,8 +117,6 @@ curl -sk --max-time 10 -o /dev/null -w "Gemini: HTTP %{http_code}\n" \
 ---
 
 ## Architecture
-
-### System Overview
 
 ```mermaid
 flowchart TB
@@ -107,18 +157,12 @@ flowchart TB
         Vault -.->|"inject credentials<br/>into outbound requests"| GW
     end
 
-    subgraph clusterB ["Inference Cluster B (bf44z)"]
+    subgraph clusterB ["Inference Cluster B (bf44z) — Pool B"]
         GW_B{{"Istio Gateway"}}:::routing
         EPP_B["llm-d EPP<br/>KServe-managed"]:::inference
         vLLM_B[("vLLM<br/>gemma2-9b-fp8")]:::inference
         GW_B --> EPP_B
         EPP_B --> vLLM_B
-    end
-
-    subgraph clusterA ["Inference Cluster A (4l6x6)"]
-        EPP_A["llm-d EPP<br/>KServe-managed"]:::inference
-        vLLM_A[("vLLM<br/>gemma2-9b-fp8")]:::inference
-        EPP_A --> vLLM_A
     end
 
     Gemini[["Google Gemini API"]]:::external
@@ -135,20 +179,9 @@ flowchart TB
     classDef infra fill:#f1f3f4,stroke:#5f6368,stroke-width:2px,color:#5f6368
 ```
 
-**What each component does:**
+> The same model (gemma2-9b-fp8) is also deployed on **Inference Cluster A (4l6x6)** with KServe-managed llm-d. Cluster A demonstrates multi-location deployment and is accessible through its own gateway. It can be added to the weighted HTTPRoute at any time.
 
-| Component | What it does in this setup |
-|-----------|---------------------------|
-| **MaaS Gateway** | Single entry point for all traffic. Envoy proxy behind an AWS ELB. |
-| **Authorino** | Validates `sk-oai-*` API keys against PostgreSQL on every request. |
-| **Limitador** | Enforces per-subscription token budgets (e.g. 100K tokens/min for premium). |
-| **HTTPRoute (50/50)** | Weighted split: 50% to local Pool A, 50% to Cluster B via ExternalName Service. |
-| **ExternalModel HTTPRoute** | Routes `/gemini-2-0-flash/` requests to Google Gemini. Credentials injected by Vault via payload-processing plugin. |
-| **llm-d EPP** | KServe-managed scheduler on each cluster. Scores pods by KV cache, queue depth, load. Routes to optimal replica when `replicas > 1`. |
-| **Vault + ESO** | Stores provider credentials (Gemini API key). ESO syncs to K8s Secrets. Payload-processing plugin injects into outbound requests. |
-| **Cluster A** | Independent inference cluster with same model + llm-d. Demonstrates the "deploy in 2+ locations" requirement. Has its own reencrypt Route, anonymous AuthPolicy, and TRLP override — ready for direct access or for adding to a future multi-gateway mesh topology. |
-
-### Request Lifecycle (Sequence)
+### Request Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -191,46 +224,6 @@ sequenceDiagram
 |-------|-----------|-------------|-----------------|
 | **Cross-cluster** | Gateway API weighted HTTPRoute | Splits traffic 50/50 between AI Bridge (local) and Cluster B (remote) | Always — distributes load across clusters |
 | **Intra-cluster** | llm-d EPP (KServe-managed) | Scores vLLM pods by KV cache utilization, queue depth, and load; picks the optimal replica | When `replicas > 1` — intelligent pod selection within each cluster |
-
-### Multi-Cluster Load Balancing Detail
-
-```mermaid
-flowchart LR
-    subgraph gov ["MaaS Governance"]
-        AuthLim["Auth + Rate Limit<br/>(already passed)"]:::governance
-    end
-
-    subgraph split ["Weighted HTTPRoute"]
-        HR{{"50 / 50"}}:::routing
-    end
-
-    subgraph poolA ["Pool A — AI Bridge"]
-        EPP1["llm-d EPP"]:::inference
-        vLLM1[("vLLM")]:::inference
-        EPP1 --> vLLM1
-    end
-
-    subgraph poolB ["Pool B — Cluster B"]
-        IST{{"Istio Gateway"}}:::routing
-        EPP2["llm-d EPP"]:::inference
-        vLLM2[("vLLM")]:::inference
-        IST --> EPP2
-        EPP2 --> vLLM2
-    end
-
-    AuthLim --> HR
-    HR -->|"local:8000"| EPP1
-    HR -->|"ExternalName:443"| IST
-
-    classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
-    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
-    classDef inference fill:#e6f4ea,stroke:#0d904f,stroke-width:2px,color:#0d904f
-```
-
-**Three clusters, one governance point:**
-- **AI Bridge** — MaaS governance + local inference + multi-cluster load balancing
-- **Inference Cluster A** — gemma2-9b-fp8 with KServe-managed llm-d (independent, can be added to LB)
-- **Inference Cluster B** — gemma2-9b-fp8 with KServe-managed llm-d (remote backend in LB, 50% weight)
 
 ---
 
@@ -282,32 +275,34 @@ oc --context=ai-bridge get pods -n models-as-a-service | grep router-scheduler
 
 ---
 
-## Act 2: Platform Foundation (5 min)
+## Act 2: Platform Foundation + GitOps (5 min)
 
 > **Persona**: Cluster Administrator  
 > **Goal**: Show MaaS is enabled, governance stack is running, everything is GitOps-managed
 
-> **Scenario**: The platform team needs to know that the AI governance layer is production-grade: operator-managed, declarative, version-controlled, and auto-synced from Git. They want to see one configuration change that enables the entire stack.
+> **Scenario**: The platform team needs to know that the AI governance layer is production-grade: operator-managed, declarative, version-controlled, and auto-synced from Git.
 >
-> **What we'll show**: `modelsAsService: Managed` on the AI Bridge (and `Removed` on inference clusters), Tenant Active, ArgoCD Synced/Healthy from the `maas-demo` Git repo.
+> **What we'll show**: `modelsAsService: Managed`, Tenant Active, ArgoCD Synced/Healthy.
 >
 > **Requirement addressed**: *Admin Persona: Deploy model via UI / RHOAI environment*
 
 ### TELL
 
-"The AI Bridge is the governance layer — MaaS in RHOAI 3.4. One configuration change enables it. The entire stack — subscriptions, auth policies, observability, multi-cluster routing — is declarative, version-controlled in Git, deployed via ArgoCD."
+"MaaS is a governance layer in RHOAI 3.4. One configuration change enables it. The entire stack is declarative — defined in Git, deployed via operators."
 
 ### SHOW
 
+**UI — OpenShift Console:**
+- Operators → Installed Operators → Red Hat OpenShift AI
+- Show DataScienceCluster with `modelsAsService: Managed`
+
 ```bash
-# MaaS enabled
 oc get datasciencecluster default-dsc \
   -o jsonpath='{.spec.components.kserve.modelsAsService.managementState}'
 ```
 → `Managed`
 
 ```bash
-# Tenant anchors all MaaS configuration
 oc get tenant default-tenant -n models-as-a-service
 ```
 → `Active`
@@ -326,262 +321,403 @@ oc get applications.argoproj.io maas-demo-gateway -n openshift-gitops \
 ```
 → `Sync: Synced  Health: Healthy`
 
+**Key point:** "Change a subscription limit in Git → push → ArgoCD syncs automatically → MaaS enforces the new limit. No manual `oc apply`, no drift."
+
 ### TELL
 
-"MaaS runs only on the AI Bridge. Inference clusters just serve models — no governance overhead. The entire configuration is GitOps-managed. Push a change to Git, ArgoCD syncs automatically. No manual `oc apply`, no drift."
+"With MaaS enabled, the platform automatically provisions Authorino for API key validation, Limitador for token-based rate limiting, MaaS API for key management, and PostgreSQL for storing key hashes. Cluster admins enable it once. The operator handles the rest."
 
 ---
 
-## Act 3: GPU & vLLM Metrics (5 min)
+## Act 3: Governance Configuration (5 min)
 
-> **Persona**: Admin — GPU infrastructure visibility  
-> **Goal**: Show GPU consumption and vLLM metrics from each server
+> **Persona**: AI Administrator  
+> **Goal**: Define who can access which models with what limits
 
-> **Scenario**: The infrastructure team needs visibility into GPU utilization, model throughput, and token consumption across all inference environments. They want a single observability plane covering every cluster.
+> **Scenario**: AI administrators need to set up per-team governance declaratively. Each team gets a subscription with model access and token limits. The MaaS controller auto-generates rate-limit policies from subscriptions.
 >
-> **What we'll show**: Prometheus metrics from the AI Bridge cluster — total generation tokens, prompt tokens, active requests, and request success counts. 195 vLLM metric series auto-collected by KServe ServiceMonitors.
+> **What we'll show**: Subscription YAML, tiered access model, auto-generated policies.
 >
-> **Requirement addressed**: *Admin Persona: Being able to see GPU consumption, vLLM metrics from each Server*
+> **Requirement addressed**: *Admin/User Persona: Ability to track the usage of Tokens*
 
 ### TELL
 
-"Platform administrators need visibility into GPU utilization, model throughput, and inference latency across all serving environments. RHOAI provides this through Prometheus metrics collected from every vLLM instance and exposed in the dashboard."
+"Subscriptions are the core governance primitive. Each team gets independent quotas, model access control, and priority levels. Everything is a Kubernetes resource — version-controlled, auditable, GitOps-friendly."
 
 ### SHOW
 
 **UI — RHOAI Dashboard:**
-- Navigate to **Observe & Monitor → Dashboard**
-- Show token consumption, request counts, latency panels
+- Settings → Subscriptions → show list of subscriptions
+- Click a subscription to show details (groups, models, limits)
 
-**CLI — Prometheus Metrics:**
-```bash
-# Total generation tokens across the cluster
-curl -sk -H "Authorization: Bearer $(oc whoami -t)" \
-  "https://thanos-querier-openshift-monitoring.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/api/v1/query?query=kserve_vllm:generation_tokens_total"
-```
-→ Shows cumulative token count (value grows with each request)
+![Admin Subscriptions List](images/screenshots/05-admin-subscriptions-list.png)
+
+![Admin Subscription Detail](images/screenshots/06-admin-subscription-detail.png)
 
 ```bash
-# vLLM requests running
-curl -sk -H "Authorization: Bearer $(oc whoami -t)" \
-  "https://$PROM_HOST/api/v1/query?query=vllm:num_requests_running"
+oc get maassubscriptions -n models-as-a-service \
+  -o custom-columns="NAME:.metadata.name,PHASE:.status.phase,PRIORITY:.spec.priority"
 ```
-→ Shows active requests per model
+→ Shows 7 subscriptions: admin, team-a-premium, team-a-ml-engineering, team-b-standard, team-b-data-science, team-c-basic, team-c-app-developers
 
-"195 vLLM metrics are available: KV cache utilization, throughput, latency histograms, GPU memory usage. ServiceMonitors are auto-created by KServe for every deployed model."
+**Example Subscription YAML:**
+```yaml
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: team-a-premium
+  namespace: models-as-a-service
+spec:
+  owner:
+    groups:
+      - name: "team-a"
+      - name: "system:authenticated"
+  modelRefs:
+    - name: gemma2-9b-fp8
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 100000
+          window: "1m"
+    - name: gemini-2-0-flash
+      namespace: models-as-a-service
+      tokenRateLimits:
+        - limit: 50000
+          window: "1m"
+  priority: 10
+```
+
+**Tiered Access Model:**
+
+| Tier | Subscription | Token Limit | Use Case |
+|------|-------------|-------------|----------|
+| Premium | `team-a-premium` | 100K tokens/min | Production workloads |
+| Standard | `team-b-standard` | 20K tokens/min | Development |
+| Basic | `team-c-basic` | 5K tokens/min | Experimentation |
 
 ### TELL
 
-"Full observability without custom instrumentation. Every vLLM instance, every GPU, every cluster — metrics flow to Prometheus automatically. Platform teams use this for capacity planning, cost allocation, and SLA tracking."
+"The MaaS controller automatically generates `TokenRateLimitPolicy` resources from subscriptions. You never create rate-limit policies manually. One team's burst cannot affect another — quotas are independent."
 
 ---
 
-## Act 4: Single Endpoint + Token Tracking (7 min)
+## Act 4: Authentication Enforcement (5 min)
+
+> **Persona**: Security / Platform Team  
+> **Goal**: Prove zero-trust authentication at the gateway
+
+> **Scenario**: Every request to the AI Bridge must be authenticated. The security team needs to see that unauthenticated requests are rejected, invalid keys are blocked, and valid keys grant access. The same key works for local models AND external providers.
+>
+> **What we'll show**: 401 → 403 → 200 progression, then same key routing to Gemini.
+>
+> **Requirement addressed**: *Show AI gateway handling routing and prompt processing*
+
+### TELL
+
+"Every request is validated. No auth = rejection. Wrong key = rejection. The API is OpenAI-compatible — existing code works with just a base_url change."
+
+### SHOW
+
+```bash
+# 1. No auth → 401
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"hi"}]}'
+```
+→ `HTTP 401`
+
+```bash
+# 2. Fake key → 403
+curl -sk -w "\nHTTP %{http_code}\n" -o /dev/null \
+  "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
+  -H "Authorization: Bearer sk-oai-FAKE-KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"hi"}]}'
+```
+→ `HTTP 403`
+
+```bash
+# 3. Valid key → 200
+curl -sk "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"What is OpenShift AI?"}],"max_tokens":50}' \
+  | python3 -m json.tool
+```
+→ HTTP 200, model responds
+
+### TELL
+
+"Zero trust by default. 401 = no credentials. 403 = Authorino checked the key against PostgreSQL and rejected it. 200 = valid key, subscription verified, token budget checked — all before the request reaches the model. The `sk-oai-*` format is intentionally OpenAI-compatible."
+
+---
+
+## Act 5: User Self-Service (7 min)
+
+> **Persona**: Developer / Data Scientist  
+> **Goal**: Show the complete user journey from finding models to making API calls
+
+> **Scenario**: Users need to self-serve without admin help. They browse models, see their subscription limits, generate API keys, and test in the Playground — no command line required.
+>
+> **What we'll show**: Dashboard UI journey through model discovery, API key generation, Playground testing, and Python SDK integration.
+>
+> **Requirement addressed**: *Deploy model via UI (bonus points)*
+
+### TELL
+
+"Users self-serve through the RHOAI Dashboard. They browse available models, see their subscription limits, generate API keys, and test in the playground — no kubectl or cluster access required."
+
+### SHOW
+
+**UI — RHOAI Dashboard:**
+
+1. **Gen AI Studio → AI asset endpoints** — show models list
+
+![User Models List](images/screenshots/01-user-models-list.png)
+
+2. Click **View** on gemma2-9b-fp8 — show endpoint URL + subscription selector
+3. Click **Generate API key** — show `sk-oai-*` key (explain: shown only once)
+
+![View Endpoint and Generate Key](images/screenshots/02-user-view-endpoint-apikey.png)
+
+4. **Gen AI Studio → Playground** — type a prompt, show model responding
+
+![User Playground](images/screenshots/08-user-playground.png)
+
+5. **Gen AI Studio → API keys** — show key management (create, view, revoke)
+
+![User API Keys List](images/screenshots/07-user-apikeys-list.png)
+
+**Python SDK:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://<MAAS_GW>/models-as-a-service/gemma2-9b-fp8/v1",
+    api_key="sk-oai-..."
+)
+
+response = client.chat.completions.create(
+    model="gemma2-9b-fp8",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+```
+
+### TELL
+
+"Complete self-service. Users don't need admin help. Keys are scoped to their subscription's models and token limits. Revocation is permanent and immediate. Standard OpenAI SDKs work with just a base_url change."
+
+---
+
+## Act 6: Single Endpoint + Token Tracking (5 min)
 
 > **Persona**: Admin/User — single endpoint, token accountability  
 > **Goal**: Show one URL for all model access, with per-subscription token tracking
 
-> **Scenario**: Multiple teams need to consume the same model through a single governed endpoint. Each team has different token budgets. The platform team needs per-team usage data for cost allocation and chargeback.
+> **Scenario**: Multiple teams consume the same model. The platform team needs per-team usage data for cost allocation and chargeback.
 >
-> **What we'll show**: 7 active MaaS subscriptions with different token limits, a live inference request through the single gateway URL returning `usage.total_tokens`, and the RHOAI Dashboard where users self-serve API keys.
+> **What we'll show**: Live request with `usage.total_tokens` in response, 7 active subscriptions.
 >
-> **Requirements addressed**: *Expose the deployed Model as a single Endpoint behind an AI Gateway* + *Ability to track the usage of Tokens based on the exposed LLM Endpoint*
+> **Requirements addressed**: *Single Endpoint behind AI Gateway* + *Token usage tracking*
 
 ### TELL
 
-"The AI Bridge exposes every model as a single OpenAI-compatible endpoint. Users get an API key scoped to their subscription. Token usage is tracked per subscription for cost allocation and chargeback."
+"The AI Bridge exposes every model as a single OpenAI-compatible endpoint. Token usage is tracked per subscription for cost allocation."
 
 ### SHOW
 
-**UI — RHOAI Dashboard:**
-- Gen AI Studio → AI asset endpoints → show gemma2-9b-fp8 endpoint
-- Click View → show subscription selector, Generate API key
-
 ```bash
-# 7 active subscriptions with different token limits
-oc get maassubscriptions -n models-as-a-service \
-  -o custom-columns="NAME:.metadata.name,PHASE:.status.phase,PRIORITY:.spec.priority"
-```
-→ Shows admin, team-a-premium, team-b-standard, team-c-basic, etc.
-
-```bash
-# Single endpoint — authenticated request
 curl -sk "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"What is Red Hat OpenShift AI?"}],"max_tokens":50}' \
   | python3 -m json.tool
 ```
-→ HTTP 200, model responds, `usage.total_tokens` in response
+→ HTTP 200, note `usage.total_tokens` in the response
 
-"Note the `usage` field — total_tokens is tracked per request. Limitador accumulates this per subscription per time window. When the budget is exhausted, HTTP 429."
+"Limitador accumulates total_tokens per subscription per time window. When the budget is exhausted, HTTP 429."
 
 ### TELL
 
-"One URL, one API key format (`sk-oai-*`), standard OpenAI SDKs. Users don't know where the model runs — the AI Bridge handles routing. Token tracking enables per-team cost allocation without any application changes."
+"One URL, one API key format, standard OpenAI SDKs. Token tracking enables per-team cost allocation without any application changes."
 
 ---
 
-## Act 5: Multi-Cluster Load Balancing (7 min)
+## Act 7: Rate Limiting + Noisy Neighbor Protection (5 min)
 
-> **Persona**: Admin — deploy model in 2+ locations, load balance  
-> **Goal**: Prove the same model on 2 clusters with traffic distributed through the AI Bridge
+> **Persona**: Platform Team / AI Administrator  
+> **Goal**: Prove noisy-neighbor protection with independent token budgets
 
-> **Scenario**: The same model is deployed on the AI Bridge cluster and on a remote inference cluster. The customer wants a single endpoint that load-balances across both, with full governance regardless of which cluster handles the request.
+> **Scenario**: A basic-tier team sends a burst of large requests. Their token limit should be hit (429) while premium-tier teams continue unaffected. This proves independent quotas.
 >
-> **What we'll show**: The weighted HTTPRoute (50/50 split), 6 live requests all returning HTTP 200, gateway proxy logs proving traffic goes to BOTH local and remote backends, and annotated llm-d EPP logs proving intelligent routing is in the traffic path.
+> **What we'll show**: Burst test hitting 429, then premium key still returning 200.
 >
-> **Requirements addressed**: *Is there a way to have the same model deployed in 2 clusters and load balance between the two* + *Show AI gateway handling routing and prompt processing*
+> **Requirement addressed**: *Ability to track the usage of Tokens* + *Show AI gateway handling routing*
 
 ### TELL
 
-"Routing happens at two levels. First, the Gateway API weighted HTTPRoute distributes traffic across clusters — 50% to the AI Bridge's local vLLM, 50% to Inference Cluster B. This is standard Gateway API, no AI intelligence. Second, llm-d EPP on each cluster selects the optimal vLLM replica within that cluster based on KV cache utilization, queue depth, and GPU load. With one replica per cluster today, llm-d passes through. When we scale to multiple replicas, llm-d's intelligent routing kicks in automatically — no configuration change needed. MaaS governance — auth, rate limiting, token tracking — applies to all traffic regardless of which cluster serves it."
+"Each subscription has independent token budgets. A burst from one team cannot impact another. Token-based limiting accounts for prompt size — a 1000-token prompt consumes 100x more than a 10-token prompt."
 
 ### SHOW
 
 ```bash
-# Multi-cluster HTTPRoute with 50/50 weighted backends
+# Burst test — multiple requests consume tokens quickly
+for i in 1 2 3 4 5; do
+  curl -sk -w "Request $i: HTTP %{http_code}\n" -o /dev/null \
+    "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
+    -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+    -d '{"model":"gemma2-9b-fp8","max_tokens":500,"messages":[{"role":"user","content":"Write a detailed essay about cloud computing."}]}'
+done
+```
+→ First requests: HTTP 200, later requests: HTTP 429 (rate limited)
+
+```bash
+# Check response headers for rate limit info
+curl -sk -D- -o /dev/null "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" \
+  -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+  -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"hello"}],"max_tokens":10}' 2>&1 | head -15
+```
+
+### TELL
+
+"When a limit is hit, the AI Bridge returns HTTP 429 with retry headers. Other subscriptions are completely unaffected — Limitador tracks counters per subscription, not globally. This is noisy-neighbor protection."
+
+---
+
+## Act 8: Multi-Cluster Load Balancing (7 min)
+
+> **Persona**: Admin — deploy model in 2+ locations, load balance  
+> **Goal**: Prove the same model on 2 clusters with traffic distributed through the AI Bridge
+
+> **Scenario**: The same model is deployed on the AI Bridge and on a remote inference cluster. The customer wants a single endpoint that load-balances across both.
+>
+> **What we'll show**: Weighted HTTPRoute, 6 requests all HTTP 200, proxy logs proving both backends, annotated EPP logs.
+>
+> **Requirements addressed**: *Load balance between 2 clusters* + *AI gateway routing*
+
+### TELL
+
+"Routing happens at two levels. The Gateway API weighted HTTPRoute distributes traffic 50/50 across clusters. llm-d EPP on each cluster selects the optimal replica within that cluster. With one replica today, llm-d passes through. When we scale to multiple replicas, intelligent routing kicks in automatically."
+
+### SHOW
+
+```bash
+# 50/50 weighted backends
 oc get httproute gemma-multi-cluster-route -n models-as-a-service \
   -o jsonpath='{range .spec.rules[0].backendRefs[*]}name={.name} weight={.weight}{"\n"}{end}'
 ```
-→ `gemma2-9b-fp8-kserve-workload-svc weight=50` (local)  
-→ `gemma2-9b-fp8-cluster3 weight=50` (remote)
+→ local weight=50, remote weight=50
 
 ```bash
-# Send 6 requests through the multi-cluster route
+# 6 requests — all HTTP 200
 for i in 1 2 3 4 5 6; do
   curl -sk --max-time 20 -o /dev/null -w "Request $i: HTTP %{http_code}\n" \
     "https://${MAAS_GW}/multi-cluster/gemma2-9b-fp8/v1/chat/completions" \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
     -d "{\"model\":\"gemma2-9b-fp8\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello $i\"}],\"max_tokens\":5}"
 done
 ```
-→ All HTTP 200
 
 ```bash
-# Verify traffic distribution from gateway proxy logs
+# Proxy logs — traffic to both backends
 GATEWAY_POD=$(oc get pods -n openshift-ingress -l gateway.networking.k8s.io/gateway-name=maas-default-gateway --no-headers | head -1 | awk '{print $1}')
 oc logs $GATEWAY_POD -n openshift-ingress --since=30s | grep multi-cluster | \
   awk '{if ($0 ~ /kserve-workload/) print "  → LOCAL (AI Bridge)"; else print "  → REMOTE (Cluster B)"}'
 ```
-→ Shows traffic going to both LOCAL and REMOTE backends
 
-**Understanding the proxy log (annotated):**
-
-```
-# What a LOCAL request looks like in the Envoy access log:
-"POST /v1/chat/completions HTTP/2" 200 - via_upstream
-  └─ "10.130.2.13:8000" outbound|8000||gemma2-9b-fp8-kserve-workload-svc.models-as-a-service.svc.cluster.local
-                         ▲                ▲
-                    Pod IP:8000       Local ClusterIP Service — this confirms Pool A (AI Bridge) served it
-
-# What a REMOTE request looks like:
-"POST /v1/chat/completions HTTP/2" 200 - via_upstream
-  └─ "3.143.196.233:443" outbound|443||gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z...
-                          ▲               ▲
-                     ELB public IP    ExternalName Service — this confirms Pool B (Cluster B) served it
-```
-
-**llm-d EPP proof — annotated log from the router-scheduler container:**
+**llm-d EPP proof:**
 
 ```bash
 oc logs -n models-as-a-service deploy/gemma2-9b-fp8-kserve-router-scheduler -c main --tail=5
 ```
 
 ```
-{"msg":"EPP received request","x-request-id":"5c8f45b0-..."}       ← Request entered the EPP
-{"msg":"EPP sent request body response(s) to proxy",                ← EPP scored the pods and made a decision
-  "x-request-id":"5c8f45b0-...",
-  "modelName":"gemma2-9b-fp8",                                     ← Correct model resolved
-  "targetModelName":"gemma2-9b-fp8"}                                ← Target pod selected
-{"msg":"EPP sent response body back to proxy",                      ← Response flowed back through EPP
-  "x-request-id":"5c8f45b0-..."}
+{"msg":"EPP received request","x-request-id":"5c8f45b0-..."}       ← Request entered EPP
+{"msg":"EPP sent request body response(s) to proxy",                ← EPP scored pods, made decision
+  "modelName":"gemma2-9b-fp8","targetModelName":"gemma2-9b-fp8"}    ← Correct model resolved
+{"msg":"EPP sent response body back to proxy"}                      ← Response flowed back through EPP
 ```
 
-> The `x-request-id` in the EPP log matches the `id` field in the client's JSON response — proving the request went through llm-d, not around it.
+> The `x-request-id` matches the client's response `id` — proving the request went through llm-d.
 
 ### TELL
 
-"To summarize the two levels: the weighted HTTPRoute handles cross-cluster distribution — which cluster gets the request. llm-d handles intra-cluster optimization — which pod within that cluster serves it. They're complementary. The HTTPRoute is dumb 50/50 splitting. llm-d is intelligent, scoring pods by KV cache, queue depth, and load. MaaS governance applies to all traffic identically — same API key, same rate limits, same token tracking, regardless of which cluster or pod serves the request. Adding a new cluster is one ExternalName Service + ServiceEntry + DestinationRule + weight in the HTTPRoute."
+"The weighted HTTPRoute handles cross-cluster distribution. llm-d handles intra-cluster optimization. They're complementary. MaaS governance applies identically regardless of which cluster serves the request."
 
 ---
 
-## Act 6: AI Gateway Routing + External Provider (5 min)
+## Act 9: External Provider + Enterprise Security (5 min)
 
-> **Persona**: Admin — route to external provider when needed  
-> **Goal**: Show the same gateway routing to Google Gemini, credentials injected server-side
+> **Persona**: Admin — route to external provider, secure credentials  
+> **Goal**: Show Gemini routing, Vault integration, secret rotation
 
-> **Scenario**: Some prompts require capabilities that the locally hosted model doesn't have — for example, a customer wants to route certain requests to Google Gemini or another cloud provider. The AI Bridge should handle this transparently, with the same API key, same governance, and zero credential exposure to end users.
+> **Scenario**: Some prompts need capabilities the local model doesn't have. The AI Bridge routes to Google Gemini transparently. Provider credentials come from Vault — never in Git, never exposed to users.
 >
-> **What we'll show**: The ExternalModel CR for Gemini, a live request to Gemini through the same API key, and the Vault/ESO credential chain that injects the provider key server-side.
+> **What we'll show**: ExternalModel CR, live Gemini request, Vault/ESO chain, secret rotation.
 >
-> **Requirement addressed**: *Route to an external provider/NeoCloud if detected. Prompt can not be handled by a Model hosted on AI Grid*
+> **Requirement addressed**: *Route to external provider/NeoCloud*
 
 ### TELL
 
-"The AI Bridge routes to any OpenAI-compatible backend — local vLLM, remote clusters, or cloud providers like Google Gemini. Provider credentials are stored in Vault and injected server-side. Users never see them. Same API key works for everything."
+"The AI Bridge routes to any OpenAI-compatible backend. Provider credentials are stored in Vault and injected server-side. Same API key works for everything."
 
 ### SHOW
 
 ```bash
-# ExternalModel for Google Gemini
+# ExternalModel
 oc get externalmodel -n models-as-a-service
 ```
 → `gemini-2-0-flash   openai   gemini-2.0-flash   generativelanguage.googleapis.com`
 
 ```bash
-# Same API key → Gemini (external provider)
+# Same API key → Gemini
 curl -sk "https://${MAAS_GW}/models-as-a-service/gemini-2-0-flash/v1/chat/completions" \
-  -H "Authorization: Bearer ${API_KEY}" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
   -d '{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"What is Red Hat?"}],"max_tokens":50}' \
   | python3 -m json.tool
 ```
-→ HTTP 200, response from Google Gemini
-
-"Same API key, same AI Bridge — but the response came from Google Gemini. The Gemini API key was injected from Vault via External Secrets Operator. Zero credential exposure."
+→ HTTP 200 from Gemini
 
 ```bash
-# Credentials synced from Vault
+# Vault + ESO credential chain
 oc get externalsecret gemini-credentials -n models-as-a-service \
   -o jsonpath='Status: {.status.conditions[0].reason}'
 ```
 → `SecretSynced`
 
+"Credential chain: `vault-seed-credentials` → `vault-init` Job → Vault → ESO → K8s Secret → payload-processing injects into outbound requests. No credentials in Git."
+
 ### TELL
 
-"Adding a new external provider: one `ExternalModel` CR + one Secret in Vault. The payload-processing plugin resolves the model, injects credentials, and forwards. Users never change their code — same base URL, same API key."
-
-> **Note**: The Gemini API key is maintained automatically via `vault-seed-credentials` → `vault-init` Job → Vault → ESO. If it expires, update the `gemini-api-key` field in the `vault-seed-credentials` secret on the cluster (never in Git), then let ArgoCD re-run the vault-init PostSync hook.
+"Adding a new provider = one ExternalModel CR + one Secret in Vault. Users never change their code. The AI Bridge supports Gemini, OpenAI, Anthropic, Bedrock — any OpenAI-compatible endpoint."
 
 ---
 
-## Act 7: Guardrails — Content Safety (5 min)
+## Act 10: Guardrails — Content Safety (5 min)
 
 > **Persona**: Admin / Compliance  
 > **Goal**: Show PII detection and content safety enforcement
 
-> **Scenario**: The compliance team requires that PII (SSN, credit card numbers, email addresses) is detected and handled before reaching the model. They need to see a guardrails layer that inspects input, detects violations, and either blocks or flags the request.
+> **Scenario**: The compliance team requires PII detection before requests reach the model.
 >
-> **What we'll show**: A clean request passing through unfiltered, then a PII-laden request (SSN + credit card) where the model recognizes and refuses to process the sensitive data. Two endpoints: `/passthrough` (no filtering) and `/pii` (PII detection active).
+> **What we'll show**: Clean request passing, PII request detected and refused.
 >
-> **Requirement addressed**: *Apply guardrails to the hosted Model and detect when the violation happens*
+> **Requirement addressed**: *Apply guardrails and detect violations*
 
 ### TELL
 
-"The AI Bridge includes guardrails for content safety. A guardrails orchestrator runs detectors that inspect requests for PII — email addresses, SSNs, credit card numbers. When a violation is detected, the request is flagged before it reaches the model."
+"The AI Bridge includes guardrails for content safety — PII detectors for email, SSN, credit card patterns."
 
 ### SHOW
 
 ```bash
-# Guardrails running
 oc get pods -n ai-guardrails --no-headers
 ```
 → `guardrails-gateway-*   2/2   Running`
 
 ```bash
-# Clean request → passes through
+# Clean request → passes
 oc exec -n ai-guardrails deployment/guardrails-gateway -- \
   curl -s http://localhost:8090/passthrough/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -596,49 +732,68 @@ oc exec -n ai-guardrails deployment/guardrails-gateway -- \
   -H "Content-Type: application/json" \
   -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"My SSN is 123-45-6789 and card 4111111111111111"}],"max_tokens":20}'
 ```
-→ Expected output (model refuses to process PII):
-```json
-{
-  "choices": [{
-    "message": {
-      "content": "I'm sorry, but I cannot store or process any personal information..."
-    }
-  }],
-  "usage": {"prompt_tokens": 30, "total_tokens": 50}
-}
-```
-> The model recognized the SSN and credit card patterns and refused to process them. The `detections` field (when present) lists which patterns matched. This demonstrates content safety without blocking the entire request — the model's built-in safety layer responds appropriately.
+→ Model refuses: *"I cannot store or process any personal information..."*
 
 ### TELL
 
-"Two endpoints: `/passthrough` for unfiltered access, `/pii` for PII detection. The guardrails layer inspects both input and output. In production, this integrates with the IPP (Intelligent Payload Processor) pipeline for inline enforcement — every request passes through guardrails before reaching the model."
+"Two endpoints: `/passthrough` for unfiltered, `/pii` for PII detection. In production, this integrates with the IPP pipeline for inline enforcement."
 
 ---
 
-## Act 8: Summary (3 min)
+## Act 11: GPU & vLLM Metrics (3 min)
+
+> **Persona**: Admin — GPU infrastructure visibility  
+> **Goal**: Show metrics from each server
+
+> **Scenario**: Platform team needs GPU utilization and token throughput visibility.
+>
+> **What we'll show**: Prometheus metrics — token counts, request counts.
+>
+> **Requirement addressed**: *GPU consumption, vLLM metrics from each Server*
+
+### SHOW
+
+**UI — RHOAI Dashboard → Observe & Monitor → Dashboard**
+
+```bash
+curl -sk -H "Authorization: Bearer $(oc whoami -t)" \
+  "https://thanos-querier-openshift-monitoring.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/api/v1/query?query=kserve_vllm:generation_tokens_total"
+```
+→ Shows cumulative token count
+
+"195 vLLM metrics available. ServiceMonitors are auto-created by KServe for every deployed model."
+
+---
+
+## Act 12: Summary (3 min)
 
 ### Requirements Alignment
 
-| Requirement | Status | How We Showed It |
-|-------------|--------|------------------|
-| Deploy model in 2+ locations | Done | gemma2-9b-fp8 on 3 RHOAI clusters |
-| GPU consumption, vLLM metrics | Done | Prometheus metrics, 195 vLLM series |
-| Single endpoint behind AI Gateway | Done | `https://$MAAS_GW/models-as-a-service/gemma2-9b-fp8/v1/...` |
-| Token usage tracking | Done | Per-subscription token counters, 7 Active subscriptions |
-| Multi-cluster load balancing | Done | 50/50 weighted HTTPRoute, 6/6 HTTP 200 |
-| AI gateway routing + prompt processing | Done | llm-d EPP in traffic path, request routing logged |
-| Route to external provider | Done | Same API key → Google Gemini via ExternalModel |
-| Guardrails / PII detection | Done | SSN and credit card patterns detected |
-| GitOps managed | Done | ArgoCD Synced/Healthy, all config in Git |
+| Requirement | Status | Act |
+|-------------|--------|-----|
+| Deploy model in 2+ locations | Done | Act 1 — 3 RHOAI clusters |
+| Deploy via UI (bonus) | Done | Act 5 — RHOAI Dashboard |
+| GPU / vLLM metrics | Done | Act 11 — Prometheus, 195 series |
+| Single endpoint behind AI Gateway | Done | Act 6 — one URL |
+| Token usage tracking | Done | Acts 3, 6 — per-subscription counters |
+| AI gateway routing + prompt processing | Done | Acts 4, 8 — auth + llm-d EPP |
+| Multi-cluster load balancing | Done | Act 8 — 50/50, 6/6 HTTP 200 |
+| Route to external provider | Done | Act 9 — Gemini via ExternalModel |
+| Guardrails / PII detection | Done | Act 10 — SSN + credit card detected |
+| GitOps managed | Done | Act 2 — ArgoCD Synced/Healthy |
 
 ### Key Takeaways
 
-1. **One AI Bridge, multiple inference clusters** — centralized governance, distributed compute
-2. **llm-d is KServe-managed** — `scheduler: {}` in LLMInferenceService, no standalone deployments
-3. **Same API key for everything** — local models, remote clusters, cloud providers
-4. **Per-team governance** — independent quotas, no noisy neighbors
-5. **Full observability** — GPU metrics, token tracking, per-subscription dashboards
-6. **GitOps-native** — entire configuration in Git, ArgoCD auto-syncs
+1. **Single front door** — one gateway for all AI model access
+2. **Per-team governance** — independent quotas, no noisy neighbors
+3. **Multi-cluster LB** — same model on multiple clusters, load balanced
+4. **llm-d is KServe-managed** — `scheduler: {}`, no standalone deployments
+5. **OpenAI-compatible** — existing code works with base_url change
+6. **Self-service** — users browse, generate keys, test without CLI
+7. **Multi-provider** — local models + cloud APIs through same gateway
+8. **Enterprise security** — Vault secrets, GitOps, audit trail
+9. **Full observability** — GPU metrics, token tracking, dashboards
+10. **Responsible AI** — guardrails block PII
 
 ---
 
@@ -646,15 +801,69 @@ oc exec -n ai-guardrails deployment/guardrails-gateway -- \
 
 | Question | Answer |
 |----------|--------|
-| Can we add more inference clusters? | "Yes — deploy the model, add `scheduler: {}`, create ServiceEntry/DestinationRule on the AI Bridge, add backend to the weighted HTTPRoute. GitOps manages all of it." |
-| Does llm-d route across clusters? | "llm-d routes within each cluster among replicas. Cross-cluster routing is handled by the AI Bridge's weighted HTTPRoute. They complement each other." |
-| What about priority-based routing? | "llm-d supports request prioritization (Tech Preview in 3.4). Interactive vs batch traffic on the same endpoint." |
-| How does autoscaling work? | "llm-d autoscaling (Tech Preview) adjusts replicas based on request count, queue depth, and GPU utilization." |
-| Can we use our own identity provider? | "Yes — the Tenant CR supports external OIDC. Point `issuerUrl` to your Okta/Azure AD. Group claims map to subscriptions." |
+| Can we add more inference clusters? | "Yes — deploy the model, add `scheduler: {}`, create ServiceEntry/DestinationRule on the AI Bridge, add backend to the weighted HTTPRoute." |
+| Does llm-d route across clusters? | "llm-d routes within each cluster. Cross-cluster routing is the AI Bridge's weighted HTTPRoute. They complement each other." |
+| Priority-based routing? | "llm-d supports request prioritization (Tech Preview in 3.4)." |
+| Autoscaling? | "llm-d autoscaling (Tech Preview) adjusts replicas based on request count, queue depth, and GPU utilization." |
+| Our own identity provider? | "Yes — the Tenant CR supports external OIDC. Point `issuerUrl` to your Okta/Azure AD." |
+| PostgreSQL? | "MaaS doesn't manage PostgreSQL by design — use your existing DB infrastructure." |
 
 ---
 
-## Appendix: Environment Details
+## Appendix A: CRD Relationships
+
+```mermaid
+flowchart TB
+    subgraph userCreated ["You Create (declarative)"]
+        Tenant["Tenant<br/>1 per cluster"]:::governance
+        Sub["MaaSSubscription<br/>1 per team"]:::governance
+        AuthPol["MaaSAuthPolicy<br/>1 per model"]:::governance
+        ModelRef["MaaSModelRef<br/>1 per model"]:::governance
+        ExtModel["ExternalModel<br/>external providers"]:::external
+    end
+
+    subgraph autoGen ["Auto-Generated by MaaS Controller"]
+        HR["HTTPRoute"]:::routing
+        TRLP["TokenRateLimitPolicy"]:::routing
+        AP["AuthPolicy"]:::routing
+    end
+
+    Sub -->|"generates"| TRLP
+    Sub -->|"generates"| AP
+    ModelRef -->|"generates"| HR
+    ExtModel -->|"generates"| HR
+
+    classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
+    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
+    classDef external fill:#f3e8fd,stroke:#9334e6,stroke-width:2px,color:#9334e6
+```
+
+## Appendix B: Troubleshooting
+
+| Issue | Check |
+|-------|-------|
+| **401** | No auth header. Add `Authorization: Bearer sk-oai-...` |
+| **403** | Key invalid or unauthorized for this model. Check `oc get maassubscription -o jsonpath='{.spec.modelRefs[*].name}'` |
+| **429** | Token limit hit. Wait for window reset (typically 1 minute). Check `oc get maassubscription -o jsonpath='{.spec.modelRefs[*].tokenRateLimits}'` |
+| **Model not responding** | Check `oc get maasmodelrefs` (should be Ready) and `oc get pods -l app.kubernetes.io/part-of=llminferenceservice` |
+| **ExternalModel not working** | Check credentials Secret has label `inference.networking.k8s.io/bbr-managed: "true"` |
+
+## Appendix C: Glossary
+
+| Term | Definition |
+|------|------------|
+| **MaaS** | Models-as-a-Service — RHOAI 3.4 governance layer |
+| **Tenant** | Singleton CRD anchoring MaaS configuration |
+| **MaaSSubscription** | Per-team quota definition |
+| **ExternalModel** | Routes to external cloud providers |
+| **Kuadrant** | Red Hat Connectivity Link (auth + rate limiting) |
+| **Authorino** | API key/JWT validation |
+| **Limitador** | Token counting and rate limiting |
+| **llm-d** | Distributed inference framework with intelligent pod routing |
+| **EPP** | Endpoint Picker Pod — llm-d's scheduler component |
+| **ESO** | External Secrets Operator (Vault sync) |
+
+## Appendix D: Environment Details
 
 | Resource | Value |
 |----------|-------|
@@ -668,4 +877,4 @@ oc exec -n ai-guardrails deployment/guardrails-gateway -- \
 | External Provider | Google Gemini (via ExternalModel + Vault) |
 | GitOps | ArgoCD on all clusters, repo: github.com/rrbanda/maas-demo |
 
-> **Note**: Replace placeholder values with your actual environment details. Never commit credentials to Git. The Gemini API key is managed via `vault-seed-credentials` (cluster secret) → `vault-init` PostSync hook → Vault → ESO → K8s Secret. If it expires, update `vault-seed-credentials` on the cluster, not in Git.
+> **Note**: Never commit credentials to Git. The Gemini API key is managed via `vault-seed-credentials` (cluster secret) → `vault-init` PostSync hook → Vault → ESO → K8s Secret.
