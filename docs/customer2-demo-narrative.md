@@ -119,67 +119,44 @@ curl -sk --max-time 10 -o /dev/null -w "Gemini: HTTP %{http_code}\n" \
 ## Architecture
 
 ```mermaid
-flowchart TB
-    Client(["Client / API Consumer"]):::client
+flowchart LR
+    Client(["Client<br/>sk-oai-* key"]):::client
 
-    subgraph bridge ["AI Bridge Cluster — Governance + Inference"]
-        direction TB
-
-        subgraph gateway ["MaaS Gateway"]
-            GW{{"Envoy + ELB<br/>Single Entry Point"}}:::routing
-            Auth[["Authorino<br/>API Key Validation"]]:::governance
-            Lim[["Limitador<br/>Token Rate Limiting"]]:::governance
-        end
-
-        subgraph routing ["Routing Layer"]
-            HTTPRoute{{"HTTPRoute<br/>50/50 Weighted Split"}}:::routing
-            ExRoute{{"ExternalModel<br/>HTTPRoute"}}:::routing
-        end
-
-        subgraph localPool ["Pool A — Local InferencePool"]
-            EPP_local["llm-d EPP<br/>KServe-managed"]:::inference
-            vLLM_local[("vLLM<br/>gemma2-9b-fp8")]:::inference
-            EPP_local --> vLLM_local
-        end
-
-        subgraph govStack ["Governance Stack"]
-            MaaSAPI["MaaS API + PostgreSQL"]:::infra
-            Vault["Vault + ESO"]:::infra
-            Subs["7 MaaS Subscriptions"]:::governance
-        end
-
-        GW --> Auth
+    subgraph bridge ["AI Bridge"]
+        Auth["Authorino"]:::governance
+        Lim["Limitador"]:::governance
         Auth --> Lim
-        Lim --> HTTPRoute
-        Lim --> ExRoute
-        HTTPRoute -->|"weight: 50"| EPP_local
-        MaaSAPI -.-> Auth
-        Vault -.->|"inject credentials<br/>into outbound requests"| GW
     end
 
-    subgraph clusterB ["Inference Cluster B (bf44z) — Pool B"]
-        GW_B{{"Istio Gateway"}}:::routing
-        EPP_B["llm-d EPP<br/>KServe-managed"]:::inference
-        vLLM_B[("vLLM<br/>gemma2-9b-fp8")]:::inference
-        GW_B --> EPP_B
-        EPP_B --> vLLM_B
+    Lim --> PoolA
+    Lim --> PoolB
+    Lim --> Gemini
+
+    subgraph PoolA ["Pool A — AI Bridge (50%)"]
+        EPP1["llm-d EPP"]:::inference
+        vLLM1[("vLLM<br/>gemma2-9b-fp8")]:::inference
+        EPP1 --> vLLM1
     end
 
-    Gemini[["Google Gemini API"]]:::external
+    subgraph PoolB ["Pool B — Cluster B (50%)"]
+        EPP2["llm-d EPP"]:::inference
+        vLLM2[("vLLM<br/>gemma2-9b-fp8")]:::inference
+        EPP2 --> vLLM2
+    end
 
-    Client -->|"sk-oai-* API key"| GW
-    HTTPRoute -->|"weight: 50<br/>ExternalName:443"| GW_B
-    ExRoute -->|"payload-processing<br/>injects Gemini key"| Gemini
+    Gemini[["Gemini API<br/>(external)"]]:::external
+
+    Client --> Auth
 
     classDef client fill:#f5f5f5,stroke:#424242,stroke-width:2px,color:#424242
     classDef governance fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#1a73e8
-    classDef routing fill:#fef3e6,stroke:#e8710a,stroke-width:2px,color:#e8710a
     classDef inference fill:#e6f4ea,stroke:#0d904f,stroke-width:2px,color:#0d904f
     classDef external fill:#f3e8fd,stroke:#9334e6,stroke-width:2px,color:#9334e6
-    classDef infra fill:#f1f3f4,stroke:#5f6368,stroke-width:2px,color:#5f6368
 ```
 
-> The same model (gemma2-9b-fp8) is also deployed on **Inference Cluster A (4l6x6)** with KServe-managed llm-d. Cluster A demonstrates multi-location deployment and is accessible through its own gateway. It can be added to the weighted HTTPRoute at any time.
+**How it works:** Client → Authorino (validates API key) → Limitador (checks token budget) → routes to one of three backends: Pool A (local vLLM, 50%), Pool B (remote Cluster B, 50%), or Gemini (external provider). llm-d EPP on each pool selects the optimal vLLM replica.
+
+> The same model is also deployed on **Inference Cluster A (4l6x6)** with KServe-managed llm-d, demonstrating multi-location deployment. Cluster A is accessible through its own gateway and can be added to the weighted route at any time.
 
 ### Request Lifecycle
 
