@@ -43,28 +43,28 @@ patches:
       - op: replace
         path: /spec/rules/authentication/keycloak-jwt/jwt/issuerUrl
         value: https://keycloak-keycloak.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com/realms/ai-bridge
-  # Multi-cluster LB — Inference Cluster B (Cluster 2 / sandbox1213)
+  # Multi-cluster LB — Inference Cluster B (bf44z / sandbox2582)
   - target:
       kind: ServiceEntry
       name: gemma-cluster3-vllm
     patch: |-
       - op: replace
         path: /spec/hosts/0
-        value: inference-b.sandbox2582.opentlc.com
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   - target:
       kind: DestinationRule
       name: gemma-cluster3-tls
     patch: |-
       - op: replace
         path: /spec/host
-        value: inference-b.sandbox2582.opentlc.com
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   - target:
       kind: Service
       name: gemma2-9b-fp8-cluster3
     patch: |-
       - op: replace
         path: /spec/externalName
-        value: inference-b.sandbox2582.opentlc.com
+        value: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   # ExternalModel — Cluster 2 gemma endpoint
   - target:
       kind: ExternalModel
