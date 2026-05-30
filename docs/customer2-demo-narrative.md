@@ -27,34 +27,89 @@ export API_KEY="<YOUR_API_KEY>"  # Generate via RHOAI Dashboard
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    Client(["API Consumer<br/>sk-oai-* API key"])
+
+    subgraph bridge ["AI Bridge Cluster"]
+        direction TB
+        GW["MaaS Gateway<br/>(Envoy + ELB)"]
+        Auth["Authorino<br/>API key validation"]
+        Lim["Limitador<br/>Token rate limiting"]
+        EPP_B["llm-d EPP<br/>KServe-managed scheduler"]
+        
+        subgraph govStack ["Governance Stack"]
+            MaaSAPI["MaaS API"]
+            PG["PostgreSQL"]
+            Vault["Vault + ESO"]
+            Subs["7 Subscriptions<br/>premium / standard / basic"]
+        end
+
+        subgraph localPool ["Local InferencePool"]
+            vLLM_local["vLLM<br/>gemma2-9b-fp8"]
+        end
+
+        GW --> Auth
+        Auth --> Lim
+        Lim --> EPP_B
+        EPP_B --> vLLM_local
+        MaaSAPI -.-> PG
+        Vault -.->|"inject credentials"| GW
+    end
+
+    subgraph clusterA ["Inference Cluster A"]
+        EPP_A["llm-d EPP<br/>KServe-managed"]
+        vLLM_A["vLLM<br/>gemma2-9b-fp8"]
+        EPP_A --> vLLM_A
+    end
+
+    subgraph clusterB ["Inference Cluster B"]
+        EPP_C["llm-d EPP<br/>KServe-managed"]
+        vLLM_C["vLLM<br/>gemma2-9b-fp8"]
+        EPP_C --> vLLM_C
+    end
+
+    subgraph external ["External Providers"]
+        Gemini["Google Gemini API"]
+    end
+
+    Client -->|"All traffic enters here"| GW
+    GW -->|"50% weighted HTTPRoute"| vLLM_C
+    GW -->|"ExternalModel routing"| Gemini
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│              AI Bridge Cluster (sandbox1011)                        │
-│                                                                     │
-│  Client → MaaS Gateway → Authorino → Limitador → llm-d EPP →       │
-│                              │            │           │              │
-│                         (API key)    (tokens/hr)  (pod scoring)     │
-│                                                       │              │
-│                                    ┌──────────────────┼──────────┐  │
-│                                    │                  │          │  │
-│                              ┌─────┴──────┐    ┌─────┴──────┐   │  │
-│                              │ Local vLLM  │    │ Remote     │   │  │
-│                              │ (gemma, 50%)│    │ Cluster B  │   │  │
-│                              └────────────┘    │ (gemma,50%)│   │  │
-│                                                └────────────┘   │  │
-│                                                       │          │  │
-│                              ┌────────────┐           │          │  │
-│                              │ Google     │           │          │  │
-│                              │ Gemini API │           │          │  │
-│                              └────────────┘           │          │  │
-└─────────────────────────────────────────────────────────┘          │
-                                                                     │
-┌─────────────────────────────┐  ┌─────────────────────────────┐     │
-│  Inference Cluster A        │  │  Inference Cluster B         │     │
-│  (sandbox1213)              │  │  (sandbox2582)              │◄────┘
-│                             │  │                             │
-│  gemma2-9b-fp8 + llm-d EPP │  │  gemma2-9b-fp8 + llm-d EPP │
-└─────────────────────────────┘  └─────────────────────────────┘
+
+**Request flow:**
+1. Client sends request with `sk-oai-*` API key to the AI Bridge gateway
+2. **Authorino** validates the API key against PostgreSQL
+3. **Limitador** checks the subscription's token budget
+4. **llm-d EPP** scores available vLLM pods and selects the optimal one
+5. Request is routed to local vLLM (50%) or remote Cluster B (50%) via weighted HTTPRoute
+6. For external models (Gemini), the gateway injects provider credentials from Vault and forwards
+
+**Multi-cluster load balancing:**
+
+```mermaid
+flowchart LR
+    subgraph aiBridge ["AI Bridge Gateway"]
+        HTTPRoute["Weighted HTTPRoute<br/>50/50 split"]
+    end
+
+    subgraph poolA ["Pool A — Local"]
+        LocalEPP["llm-d EPP"]
+        LocalvLLM["vLLM Pod"]
+        LocalEPP --> LocalvLLM
+    end
+
+    subgraph poolB ["Pool B — Cluster B"]
+        RemoteGW["Istio Gateway"]
+        RemoteEPP["llm-d EPP"]
+        RemotevLLM["vLLM Pod"]
+        RemoteGW --> RemoteEPP
+        RemoteEPP --> RemotevLLM
+    end
+
+    HTTPRoute -->|"weight: 50<br/>local port 8000"| LocalEPP
+    HTTPRoute -->|"weight: 50<br/>ExternalName:443"| RemoteGW
 ```
 
 **Three clusters, one governance point:**
