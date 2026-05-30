@@ -1,7 +1,9 @@
+# DEPRECATED: Use clusters/live/inference-a/ or clusters/live/inference-b/ instead.
+# This overlay is kept for backward compatibility and redirects to inference-b.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../../profiles/multi-cluster/inference-cluster
+  - ../../../profiles/multi-cluster/inference-gemma
 patches:
   # Guardrails Deployment — VLLM_URL env var (pointing to gemma2-9b-fp8)
   - target:

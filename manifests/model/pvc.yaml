@@ -1,10 +1,16 @@
+# PVC not required for gemma2-9b-fp8 -- it uses an OCI modelcar image
+# (oci://registry.redhat.io/rhelai1/modelcar-gemma-2-9b-it-fp8:1.5).
+# KServe pulls the model directly from the container registry.
+#
+# This PVC is retained for models that use HuggingFace download (e.g. Qwen).
+# For gemma, the LLMInferenceService spec.model.uri handles everything.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: qwen25-model-weights
+  name: model-weights
   namespace: llm-inference
   labels:
-    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/name: gemma2-9b-fp8
 spec:
   # RWX required for multi-replica vLLM serving (multiple pods read model weights).
   # Requires a StorageClass that supports ReadWriteMany (NFS, CephFS, etc.).

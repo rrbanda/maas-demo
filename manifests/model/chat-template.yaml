@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gemma2-chat-template
+  namespace: llm-inference
+data:
+  template.jinja: |
+    {{ bos_token }}{% if messages[0]['role'] == 'system' %}{{ raise_exception('System role not supported') }}{% endif %}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if message['role'] == 'user' %}<start_of_turn>user
+    {{ message['content'] }}<end_of_turn>
+    {% elif message['role'] == 'assistant' %}<start_of_turn>model
+    {{ message['content'] }}<end_of_turn>
+    {% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model
+    {% endif %}

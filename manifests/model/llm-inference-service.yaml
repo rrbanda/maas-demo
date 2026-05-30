@@ -1,26 +1,22 @@
 apiVersion: serving.kserve.io/v1alpha2
 kind: LLMInferenceService
 metadata:
-  name: qwen25-7b-instruct
+  name: gemma2-9b-fp8
   namespace: llm-inference
   labels:
-    app.kubernetes.io/name: qwen25-7b-instruct
-  annotations:
-    opendatahub.io/model-type: generative
-    openshift.io/display-name: "Qwen 2.5 7B Instruct"
-    openshift.io/description: "Qwen 2.5 7B instruction-tuned model for multi-cluster inference demo"
+    app.kubernetes.io/name: gemma2-9b-fp8
 spec:
   model:
-    name: qwen25-7b-instruct
-    uri: pvc://qwen25-model-weights/Qwen2.5-7B-Instruct
+    name: gemma2-9b-fp8
+    uri: oci://registry.redhat.io/rhelai1/modelcar-gemma-2-9b-it-fp8:1.5
   replicas: 1
   router:
     # Uses route: {} (not scheduler: {}) intentionally. With scheduler: {},
     # KServe would auto-create a managed EPP and InferencePool. We use a
-    # standalone EPP deployment (manifests/llm-d/) because the OpenShift
-    # gateway controller does not yet support InferencePool as an HTTPRoute
-    # backendRef. When gateway support lands, switch to scheduler: {} and
-    # remove the standalone EPP deployment.
+    # standalone EPP deployment (manifests/llm-d/ or manifests/llm-d-inference/)
+    # because the OpenShift gateway controller does not yet support InferencePool
+    # as an HTTPRoute backendRef. When gateway support lands, switch to
+    # scheduler: {} and remove the standalone EPP deployment.
     route: {}
     gateway:
       refs:
@@ -29,20 +25,26 @@ spec:
   template:
     containers:
       - name: main
-        args:
-          - --dtype=auto
-          - --max-model-len=4096
-          - --gpu-memory-utilization=0.90
+        env:
+          - name: VLLM_ADDITIONAL_ARGS
+            value: "--chat-template /etc/chat-template/template.jinja"
         resources:
           requests:
-            cpu: "2"
-            memory: "8Gi"
+            cpu: "1"
+            memory: "2Gi"
             nvidia.com/gpu: "1"
           limits:
-            cpu: "4"
-            memory: "24Gi"
+            cpu: "3"
+            memory: "8Gi"
             nvidia.com/gpu: "1"
+        volumeMounts:
+          - mountPath: /etc/chat-template
+            name: chat-template
     tolerations:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
+    volumes:
+      - configMap:
+          name: gemma2-chat-template
+        name: chat-template

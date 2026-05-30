@@ -1,11 +1,11 @@
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSModelRef
 metadata:
-  name: qwen25-7b-instruct
+  name: gemma2-9b-fp8
   namespace: llm-inference
   labels:
-    app.kubernetes.io/name: qwen25-7b-instruct
+    app.kubernetes.io/name: gemma2-9b-fp8
 spec:
   modelRef:
     kind: LLMInferenceService
-    name: qwen25-7b-instruct
+    name: gemma2-9b-fp8

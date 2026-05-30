@@ -45,7 +45,7 @@ spec:
       backendRefs:
         - group: inference.networking.k8s.io
           kind: InferencePool
-          name: qwen25-7b-pool
+          name: gemma2-9b-fp8-pool
       timeouts:
         request: "0s"
         backendRequest: "0s"

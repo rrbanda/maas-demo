@@ -10,14 +10,14 @@
 ## Pre-Demo Setup (run before the call)
 
 ```bash
-oc login https://api.<CLUSTER_DOMAIN>:6443 --username=admin --password=<ADMIN_PASSWORD> --insecure-skip-tls-verify
+oc login https://api.cluster-6crhb.6crhb.sandbox1011.opentlc.com:6443 --username=admin --password=MzA0NjE1NjM2 --insecure-skip-tls-verify
 
-export MAAS_GW="<MAAS_GATEWAY_HOST>"
-export API_KEY="<YOUR_API_KEY>"  # Generate via RHOAI Dashboard: Gen AI Studio → API Keys
+export MAAS_GW="ae7a90237753943bb8619a15f4c4ff3e-47983113.us-east-2.elb.amazonaws.com"
+export API_KEY="sk-oai-e9lhgDa0SY5NC2VA_evZTorg6iaUNnr1Oa1QreeR0uTjgWTMCjzX8Wf9HU5e"
 ```
 
-**Dashboard URL**: `https://rh-ai.apps.<CLUSTER_DOMAIN>`  
-**Login**: admin / `<ADMIN_PASSWORD>`
+**Dashboard URL**: https://rh-ai.apps.cluster-6crhb.6crhb.sandbox1011.opentlc.com  
+**Login**: admin / MzA0NjE1NjM2
 
 ---
 
@@ -111,9 +111,15 @@ curl -sk -w "\nHTTP %{http_code}\n" "https://${MAAS_GW}/models-as-a-service/gemm
 curl -sk "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completions" -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d '{"model":"gemma2-9b-fp8","messages":[{"role":"user","content":"What is OpenShift AI?"}],"max_tokens":50}' | python3 -m json.tool
 ```
 
+**Same key → External model (Gemini):**
+```bash
+curl -sk "https://${MAAS_GW}/models-as-a-service/gemini-2-0-flash/v1/chat/completions" -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d '{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"What is OpenShift?"}],"max_tokens":50}' | python3 -m json.tool
+```
+> Say: "Same API key, same AI Bridge — but this response came from Google Gemini, not our local vLLM. The AI Bridge routes to external providers transparently. The provider API key was injected server-side from Vault. Zero credential exposure to end users."
+
 ### TELL
 
-"Zero trust by default. 401 means no credentials provided. 403 means Authorino checked the key against PostgreSQL and rejected it. 200 means valid key, subscription verified, token budget checked — all before the request reaches the model. The `sk-oai-*` key format is intentionally OpenAI-compatible. Users can create permanent keys or temporary 1-hour keys. Group membership is captured at key creation time. Revocation is immediate — no cache delay."
+"Zero trust by default. 401 means no credentials provided. 403 means Authorino checked the key against PostgreSQL and rejected it. 200 means valid key, subscription verified, token budget checked — all before the request reaches the model. Same key works for local models AND external providers like Gemini. The `sk-oai-*` key format is intentionally OpenAI-compatible. Users can create permanent keys or temporary 1-hour keys. Group membership is captured at key creation time. Revocation is immediate — no cache delay."
 
 ---
 
