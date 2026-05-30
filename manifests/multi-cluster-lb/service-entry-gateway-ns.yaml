@@ -1,20 +1,16 @@
 apiVersion: networking.istio.io/v1
 kind: ServiceEntry
 metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: '{"apiVersion":"networking.istio.io/v1","kind":"ServiceEntry","metadata":{"annotations":{},"labels":{"app.kubernetes.io/part-of":"multi-cluster-lb"},"name":"gemma-cluster3-vllm","namespace":"openshift-ingress"},"spec":{"hosts":["a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com"],"location":"MESH_EXTERNAL","ports":[{"name":"https","number":443,"protocol":"HTTPS"}],"resolution":"DNS"}}
-
-      '
   labels:
     app.kubernetes.io/part-of: multi-cluster-lb
   name: gemma-cluster3-vllm
   namespace: openshift-ingress
 spec:
   hosts:
-  - a41cf615615014b66bf7d3ccbace4de3-926113304.us-east-2.elb.amazonaws.com
+    - gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   location: MESH_EXTERNAL
   ports:
-  - name: https
-    number: 443
-    protocol: HTTPS
+    - name: https
+      number: 443
+      protocol: HTTPS
   resolution: DNS

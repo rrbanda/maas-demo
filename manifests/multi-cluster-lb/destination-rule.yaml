@@ -7,8 +7,7 @@ metadata:
   name: gemma-cluster3-tls
   namespace: models-as-a-service
 spec:
-  host: inference-b.sandbox2582.opentlc.com
+  host: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   trafficPolicy:
     tls:
-      insecureSkipVerify: true
       mode: SIMPLE

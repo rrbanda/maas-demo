@@ -8,7 +8,7 @@ metadata:
   namespace: models-as-a-service
 spec:
   hosts:
-  - inference-b.sandbox2582.opentlc.com
+  - gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   location: MESH_EXTERNAL
   ports:
   - name: https

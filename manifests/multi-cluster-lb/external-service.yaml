@@ -7,7 +7,7 @@ metadata:
   name: gemma2-9b-fp8-cluster3
   namespace: models-as-a-service
 spec:
-  externalName: inference-b.sandbox2582.opentlc.com
+  externalName: gemma2-9b-fp8-direct-models-as-a-service.apps.cluster-bf44z.bf44z.sandbox2582.opentlc.com
   ports:
   - name: https
     port: 443
