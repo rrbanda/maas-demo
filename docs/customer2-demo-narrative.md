@@ -74,17 +74,25 @@ flowchart TB
     end
 
     Client -->|"All traffic enters here"| GW
-    GW -->|"50% weighted HTTPRoute"| vLLM_C
+    GW -->|"50% via weighted HTTPRoute"| EPP_C
     GW -->|"ExternalModel routing"| Gemini
 ```
 
-**Request flow:**
+**Request flow — two levels of routing:**
+
+| Level | Component | What it does | When it matters |
+|-------|-----------|-------------|-----------------|
+| **Cross-cluster** | Gateway API weighted HTTPRoute | Splits traffic 50/50 between AI Bridge (local) and Cluster B (remote) | Always — distributes load across clusters |
+| **Intra-cluster** | llm-d EPP (KServe-managed) | Scores vLLM pods by KV cache utilization, queue depth, and load; picks the optimal replica | When `replicas > 1` — intelligent pod selection within each cluster |
+
+**Step by step:**
 1. Client sends request with `sk-oai-*` API key to the AI Bridge gateway
 2. **Authorino** validates the API key against PostgreSQL
 3. **Limitador** checks the subscription's token budget
-4. **llm-d EPP** scores available vLLM pods and selects the optimal one
-5. Request is routed to local vLLM (50%) or remote Cluster B (50%) via weighted HTTPRoute
-6. For external models (Gemini), the gateway injects provider credentials from Vault and forwards
+4. **Weighted HTTPRoute** picks the cluster — 50% local (AI Bridge), 50% remote (Cluster B)
+5. **llm-d EPP** on the selected cluster scores the vLLM pod(s) and routes to the optimal one
+6. **vLLM** serves the inference request
+7. For external models (Gemini), the gateway injects provider credentials from Vault and forwards directly
 
 **Multi-cluster load balancing:**
 
@@ -290,7 +298,7 @@ curl -sk "https://${MAAS_GW}/models-as-a-service/gemma2-9b-fp8/v1/chat/completio
 
 ### TELL
 
-"The same model is deployed across multiple clusters. The AI Bridge load-balances between them using a weighted HTTPRoute — 50% to the local instance, 50% to the remote inference cluster. MaaS governance — auth, rate limiting, token tracking — applies to all traffic regardless of which cluster serves it."
+"Routing happens at two levels. First, the Gateway API weighted HTTPRoute distributes traffic across clusters — 50% to the AI Bridge's local vLLM, 50% to Inference Cluster B. This is standard Gateway API, no AI intelligence. Second, llm-d EPP on each cluster selects the optimal vLLM replica within that cluster based on KV cache utilization, queue depth, and GPU load. With one replica per cluster today, llm-d passes through. When we scale to multiple replicas, llm-d's intelligent routing kicks in automatically — no configuration change needed. MaaS governance — auth, rate limiting, token tracking — applies to all traffic regardless of which cluster serves it."
 
 ### SHOW
 
@@ -324,7 +332,7 @@ oc logs $GATEWAY_POD -n openshift-ingress --since=30s | grep multi-cluster | \
 
 ### TELL
 
-"Traffic splits 50/50 between the AI Bridge's local vLLM and Inference Cluster B's vLLM. Both paths go through llm-d for pod-level routing. MaaS governance applies to all traffic — the same API key, the same rate limits, the same token tracking, regardless of which cluster serves the request. Adding a new cluster is one ExternalName Service + ServiceEntry + DestinationRule."
+"To summarize the two levels: the weighted HTTPRoute handles cross-cluster distribution — which cluster gets the request. llm-d handles intra-cluster optimization — which pod within that cluster serves it. They're complementary. The HTTPRoute is dumb 50/50 splitting. llm-d is intelligent, scoring pods by KV cache, queue depth, and load. MaaS governance applies to all traffic identically — same API key, same rate limits, same token tracking, regardless of which cluster or pod serves the request. Adding a new cluster is one ExternalName Service + ServiceEntry + DestinationRule + weight in the HTTPRoute."
 
 ---
 
