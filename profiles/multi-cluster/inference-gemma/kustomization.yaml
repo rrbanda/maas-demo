@@ -3,6 +3,15 @@
 # separately -- either via a dedicated ArgoCD Application or imperatively.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+patches:
+  # Inference clusters do NOT need MaaS governance -- only the AI Bridge does.
+  - target:
+      kind: DataScienceCluster
+      name: default-dsc
+    patch: |-
+      - op: replace
+        path: /spec/components/kserve/modelsAsService/managementState
+        value: Removed
 resources:
   # Platform
   - ../../../manifests/platform/monitoring-config
