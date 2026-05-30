@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: gemma-cluster-a-vllm
+  namespace: openshift-ingress
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  hosts:
+    - gemma2-9b-fp8-inference-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
+  location: MESH_EXTERNAL
+  ports:
+    - name: https
+      number: 443
+      protocol: HTTPS
+  resolution: DNS

@@ -11,6 +11,8 @@ resources:
   - external-service-cluster-a.yaml
   - service-entry-cluster-a.yaml
   - destination-rule-cluster-a.yaml
+  - service-entry-cluster-a-gateway-ns.yaml
+  - destination-rule-cluster-a-gateway-ns.yaml
   # Multi-cluster LB HTTPRoute + governance
   - httproute.yaml
   - authpolicy.yaml
