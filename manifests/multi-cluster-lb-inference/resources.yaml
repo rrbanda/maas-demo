@@ -55,6 +55,23 @@ spec:
       anonymous:
         anonymous: {}
 ---
+# Override the gateway-default-deny TokenRateLimitPolicy for this route.
+# The MaaS controller creates a default-deny with limit:0 for /v1/chat/completions.
+# This route-specific policy overrides it to allow traffic from the AI Bridge.
+apiVersion: kuadrant.io/v1alpha1
+kind: TokenRateLimitPolicy
+metadata:
+  name: gemma-direct-v1-allow-trlp
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: multi-cluster-lb
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: gemma-direct-v1-route
+  limits: {}
+---
 # Passthrough Route for direct vLLM access from AI Bridge ExternalModel
 apiVersion: route.openshift.io/v1
 kind: Route
