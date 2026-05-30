@@ -10,8 +10,6 @@ metadata:
     app.kubernetes.io/part-of: ai-bridge
 spec:
   modelRefs:
-    - name: qwen25-7b-instruct
-      namespace: models-as-a-service
     - name: gemini-2-0-flash
       namespace: models-as-a-service
   subjects:
