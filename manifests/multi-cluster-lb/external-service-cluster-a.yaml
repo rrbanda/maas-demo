@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/part-of: multi-cluster-lb
 spec:
   type: ExternalName
-  externalName: aed794ce602fc4585aff1f0ab80130b1-1131672273.us-east-2.elb.amazonaws.com
+  externalName: gemma2-9b-fp8-direct-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
   ports:
     - name: https
       port: 443

@@ -6,8 +6,12 @@ metadata:
   labels:
     app.kubernetes.io/part-of: multi-cluster-lb
 spec:
-  host: aed794ce602fc4585aff1f0ab80130b1-1131672273.us-east-2.elb.amazonaws.com
+  host: gemma2-9b-fp8-direct-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
   trafficPolicy:
+    connectionPool:
+      http:
+        h2UpgradePolicy: DO_NOT_UPGRADE
     tls:
       mode: SIMPLE
       insecureSkipVerify: true
+      sni: gemma2-9b-fp8-direct-llm-inference.apps.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com
