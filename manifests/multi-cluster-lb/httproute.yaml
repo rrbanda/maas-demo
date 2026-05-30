@@ -15,8 +15,8 @@ spec:
   - backendRefs:
     - group: ''
       kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
+      name: gemma2-9b-fp8-kserve-workload-svc
+      port: 8000
       weight: 50
     - group: ''
       kind: Service
@@ -36,8 +36,8 @@ spec:
   - backendRefs:
     - group: ''
       kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
+      name: gemma2-9b-fp8-kserve-workload-svc
+      port: 8000
       weight: 50
     - group: ''
       kind: Service
@@ -57,8 +57,8 @@ spec:
   - backendRefs:
     - group: ''
       kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
+      name: gemma2-9b-fp8-kserve-workload-svc
+      port: 8000
       weight: 50
     - group: ''
       kind: Service
@@ -78,8 +78,8 @@ spec:
   - backendRefs:
     - group: ''
       kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
+      name: gemma2-9b-fp8-kserve-workload-svc
+      port: 8000
       weight: 50
     - group: ''
       kind: Service
