@@ -9,17 +9,3 @@ spec:
   targetModel: gemini-2.0-flash
   credentialRef:
     name: gemini-credentials
----
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
-metadata:
-  name: gemma2-9b-fp8-cluster2
-  namespace: models-as-a-service
-  labels:
-    app.kubernetes.io/part-of: ai-bridge
-spec:
-  provider: openai
-  endpoint: REPLACE_WITH_INFERENCE_CLUSTER_HOSTNAME
-  targetModel: gemma2-9b-fp8
-  credentialRef:
-    name: vllm-cluster2-credentials
