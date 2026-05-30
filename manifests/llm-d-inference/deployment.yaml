@@ -21,7 +21,7 @@ spec:
         - name: epp
           image: registry.redhat.io/rhoai/odh-llm-d-inference-scheduler-rhel9@sha256:bddf686d6eaf1a607e1c697f58165d685944607cb4629648f27e56b2884e3de0
           args:
-            - --pool-name=qwen25-7b-pool
+            - --pool-name=gemma2-9b-fp8-pool
             - --pool-namespace=llm-inference
             - --secure-serving=false
             - --metrics-endpoint-auth=false

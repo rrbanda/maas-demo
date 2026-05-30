@@ -1,0 +1,17 @@
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: gemma2-9b-fp8-pool
+  namespace: llm-inference
+  labels:
+    app.kubernetes.io/part-of: llm-d-epp
+spec:
+  targetPorts:
+    - number: 8000
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: llminferenceservice
+  endpointPickerRef:
+    name: llm-d-epp
+    port:
+      number: 9002

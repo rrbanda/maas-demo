@@ -94,6 +94,7 @@ spec:
             - --pool-namespace=models-as-a-service
             - --secure-serving=false
             - --metrics-endpoint-auth=false
+            - --zap-encoder=json
           ports:
             - containerPort: 9002
               name: grpc
@@ -104,11 +105,13 @@ spec:
           livenessProbe:
             grpc:
               port: 9003
+              service: envoy.service.ext_proc.v3.ExternalProcessor
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             grpc:
               port: 9003
+              service: envoy.service.ext_proc.v3.ExternalProcessor
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:

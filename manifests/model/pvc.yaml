@@ -6,8 +6,10 @@ metadata:
   labels:
     app.kubernetes.io/name: qwen25-7b-instruct
 spec:
+  # RWX required for multi-replica vLLM serving (multiple pods read model weights).
+  # Requires a StorageClass that supports ReadWriteMany (NFS, CephFS, etc.).
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 20Gi

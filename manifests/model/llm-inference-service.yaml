@@ -15,6 +15,12 @@ spec:
     uri: pvc://qwen25-model-weights/Qwen2.5-7B-Instruct
   replicas: 1
   router:
+    # Uses route: {} (not scheduler: {}) intentionally. With scheduler: {},
+    # KServe would auto-create a managed EPP and InferencePool. We use a
+    # standalone EPP deployment (manifests/llm-d/) because the OpenShift
+    # gateway controller does not yet support InferencePool as an HTTPRoute
+    # backendRef. When gateway support lands, switch to scheduler: {} and
+    # remove the standalone EPP deployment.
     route: {}
     gateway:
       refs:

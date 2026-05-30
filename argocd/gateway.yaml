@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-gateway
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: maas-demo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/rrbanda/maas-demo.git
+    targetRevision: main
+    path: clusters/live/gateway
+  destination:
+    server: https://api.cluster-bf44z.bf44z.sandbox2582.opentlc.com:6443
+    namespace: models-as-a-service
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

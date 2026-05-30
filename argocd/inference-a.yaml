@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maas-inference-a
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: maas-demo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/rrbanda/maas-demo.git
+    targetRevision: main
+    path: clusters/live/inference-a
+  destination:
+    server: https://api.cluster-4l6x6.4l6x6.sandbox1213.opentlc.com:6443
+    namespace: llm-inference
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
