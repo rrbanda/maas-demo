@@ -17,17 +17,12 @@ spec:
       kind: Service
       name: gemma2-9b-fp8-kserve-workload-svc
       port: 8000
-      weight: 33
-    - group: ''
-      kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
-      weight: 33
+      weight: 50
     - group: ''
       kind: Service
       name: gemma2-9b-fp8-cluster3
       port: 443
-      weight: 34
+      weight: 50
     filters:
     - type: URLRewrite
       urlRewrite:
@@ -44,17 +39,12 @@ spec:
       kind: Service
       name: gemma2-9b-fp8-kserve-workload-svc
       port: 8000
-      weight: 33
-    - group: ''
-      kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
-      weight: 33
+      weight: 50
     - group: ''
       kind: Service
       name: gemma2-9b-fp8-cluster3
       port: 443
-      weight: 34
+      weight: 50
     filters:
     - type: URLRewrite
       urlRewrite:
@@ -71,17 +61,12 @@ spec:
       kind: Service
       name: gemma2-9b-fp8-kserve-workload-svc
       port: 8000
-      weight: 33
-    - group: ''
-      kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
-      weight: 33
+      weight: 50
     - group: ''
       kind: Service
       name: gemma2-9b-fp8-cluster3
       port: 443
-      weight: 34
+      weight: 50
     filters:
     - type: URLRewrite
       urlRewrite:
@@ -98,17 +83,12 @@ spec:
       kind: Service
       name: gemma2-9b-fp8-kserve-workload-svc
       port: 8000
-      weight: 33
-    - group: ''
-      kind: Service
-      name: gemma2-9b-fp8-cluster-a
-      port: 443
-      weight: 33
+      weight: 50
     - group: ''
       kind: Service
       name: gemma2-9b-fp8-cluster3
       port: 443
-      weight: 34
+      weight: 50
     filters:
     - type: URLRewrite
       urlRewrite:
